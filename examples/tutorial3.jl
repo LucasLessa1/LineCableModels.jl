@@ -356,21 +356,21 @@ formulation = FormulationSet(:FEM,
     options=opts
 );
 
-# # Run the FEM model
-# @time workspace, line_params = compute!(problem, formulation);
+# Run the FEM model
+@time workspace, line_params = compute!(problem, formulation);
 
-# # Display primary core results
-# if !opts.mesh_only
-#     Z = line_params.Z[1, 1, 1]
-#     Y = line_params.Y[1, 1, 1]
-#     R = real(Z) * 1000
-#     L = imag(Z) / (2π * f[1]) * 1e6
-#     C = imag(Y) / (2π * f[1]) * 1e9
-#     println("R = $(@sprintf("%.6g", R)) Ω/km")
-#     println("L = $(@sprintf("%.6g", L)) mH/km")
-#     println("C = $(@sprintf("%.6g", C)) μF/km")
-# end
+# Display primary core results
+if !opts.mesh_only
+    Z = line_params.Z[1, 1, 1]
+    Y = line_params.Y[1, 1, 1]
+    R = real(Z) * 1000
+    L = imag(Z) / (2π * f[1]) * 1e6
+    C = imag(Y) / (2π * f[1]) * 1e9
+    println("R = $(@sprintf("%.6g", R)) Ω/km")
+    println("L = $(@sprintf("%.6g", L)) mH/km")
+    println("C = $(@sprintf("%.6g", C)) μF/km")
+end
 
-# # Export ZY matrices to ATPDraw
-# output_file = fullfile("ZY_export.xml")
-# export_file = export_data(:atp, line_params, f; file_name=output_file, cable_system=cable_system);
+# Export ZY matrices to ATPDraw
+output_file = fullfile("ZY_export.xml")
+export_file = export_data(:atp, line_params, f; file_name=output_file, cable_system=cable_system);

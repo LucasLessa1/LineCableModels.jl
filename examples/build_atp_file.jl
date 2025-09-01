@@ -44,7 +44,6 @@ end
 # The function signature is now parameterized for type stability.
 function generate_atp_file(
     cable_system::LineCableSystem,
-    config::NamedTuple, 
     earth_params::EarthModel; 
     base_freq=f₀, 
     file_name::String="cable_lcc.dat"
@@ -53,7 +52,8 @@ function generate_atp_file(
     file_name = isabspath(file_name) ? file_name : joinpath(@__DIR__, file_name)
     # We write to an in-memory IOBuffer to minimize string allocations. This is much faster.
     buffer = IOBuffer()
-
+    modal_z_type = 2 # 2-sqrt(Im{Z}/Im{Y}), 3-Re(sqrt(Z/Y))
+    addCG = 3  # C=1, G=2, CG=3
     println(buffer, "BEGIN NEW DATA CASE")
     println(buffer, "CABLE CONSTANTS")
     println(buffer, "CABLE PARAMETERS")
@@ -70,7 +70,7 @@ function generate_atp_file(
     position = sign(count(x -> x < 0, vert_comps) > length(cable_system.cables)/2 ? -1 : 1)
     model = 1 # Bergeron=1
 
-    println(buffer, "    2   ", mod_prin(2, position), "    ", num_cables, "         ", model, "    1            ", (sum(num_components) - num_cables), "    0    ", config.addCG)
+    println(buffer, "    2   ", mod_prin(2, position), "    ", num_cables, "         ", model, "    1            ", (sum(num_components) - num_cables), "    0    ", addCG)
     
     join(buffer, ("    " * string(n) for n in num_components))
     println(buffer)
@@ -96,17 +96,16 @@ function generate_atp_file(
             end
             if n_written > 0; println(buffer); end
         end
-
-        if config.addCG > 0
+        if addCG > 0
             println(buffer, "C Additional conductance and capacitance card")
             let n_written = 0
                 for comp in cable.design_data.components
                     ins_group = comp.insulator_group
-                    if config.addCG == 1
+                    if addCG == 1
                         vals = ("", ins_group.shunt_capacitance)
-                    elseif config.addCG == 2
+                    elseif addCG == 2
                         vals = (ins_group.shunt_conductance, "")
-                    else # config.addCG == 3
+                    else # addCG == 3
                         vals = (ins_group.shunt_conductance, ins_group.shunt_capacitance)
                     end
 
@@ -139,7 +138,7 @@ function generate_atp_file(
         if n_written > 0; println(buffer); end
     end
 
-    println(buffer, "     ", mod_prin(10, earth_params.layers[end].base_rho_g), "     ", mod_prin(10, base_freq), "     ", mod_prin(10, cable_system.line_length), "     ", config.modal_z_type)
+    println(buffer, "     ", mod_prin(10, earth_params.layers[end].base_rho_g), "     ", mod_prin(10, base_freq), "     ", mod_prin(10, cable_system.line_length), "     ", modal_z_type)
 
     println(buffer, "BLANK CARD ENDING FREQUENCY CARDS")
     println(buffer, "\$PUNCH")
@@ -223,7 +222,6 @@ function run_dat_file(
     \$EOF    { Software end-of-file terminates last of 20 or fewer VMS-like symbols
     """
 
-    println("Executing ATP for: ", basename(dat_file))
     
     dat_dir = dirname(dat_file)
     temp_startup_path = joinpath(dat_dir, "startup")
@@ -238,12 +236,8 @@ function run_dat_file(
         # --- 2. Change to the data directory to run the solver ---
         # The `cd(path) do ... end` block automatically returns to the original directory.
         cd(dat_dir) do
-            println("Changed directory to: $(pwd())")
-            # The command uses the full path to the executable, but just the
-            # filename for the .dat file since we are now in its directory.
             atp_cmd = Cmd([atp_executable, basename(dat_file)])
             
-            # --- 3. Capture the output ---
             captured_output = readchomp(atp_cmd)
         end # Automatically returns to the original directory here
 
@@ -253,8 +247,6 @@ function run_dat_file(
         println("ERROR: Failed during ATP execution.")
         println(e)
     finally
-        # --- COMPREHENSIVE CLEANUP ---
-        println("Cleaning up all temporary files...")
         
         # 1. Clean up files with known names based on the input .dat file
         base_path_name = splitext(dat_file)[1]
@@ -276,20 +268,153 @@ function run_dat_file(
     return captured_output
 end
 
-config = (
-    addCG=3,        # C=1, G=2, CG=3
-    modal_z_type=2 # 2-sqrt(Im{Z}/Im{Y}), 3-Re(sqrt(Z/Y))
-)
-output_file = fullfile("my_cable.dat")
-file = generate_atp_file(cable_system, config, earth_params, file_name=output_file)
-lis_content = run_dat_file(file)
-Z = read_data(Val(:atp), lis_content, cable_system)
-# atp_executable="C:/ATP/tools/runATP.exe"
-# atp_cmd = `$atp_executable $file`
+"""
+    rebuild_library(modification::NamedTuple; base_library=MaterialsLibrary(add_defaults=true))
 
-# # run(atp_cmd)
-# output = readchomp(atp_cmd)
-# display(output)
-# # println(file)
-println("File saved to: ", output_file)
-display(Z)
+Creates a new, modified `MaterialsLibrary` by applying changes to a single material.
+
+This optimized function performs a deep copy of the `base_library` and directly
+modifies the properties of the specified material, making it faster and more concise
+than iterating through the entire collection.
+
+# Arguments
+- `modification`: A `NamedTuple` containing an `id::String` key for the material to
+  change, plus any properties to override (e.g., `rho`, `eps_r`).
+- `base_library`: The source `MaterialsLibrary`. Defaults to the package's default library.
+
+# Returns
+- A new `MaterialsLibrary` object with the modified material.
+"""
+function rebuild_library(modification::NamedTuple; base_library=MaterialsLibrary(add_defaults=true))::MaterialsLibrary
+
+    if !haskey(modification, :id)
+        error("Modification NamedTuple must contain an 'id' key.")
+    end
+
+    material_id = modification.id
+    
+    # faster than rebuilding.
+    new_library = deepcopy(base_library)
+
+    if !haskey(new_library.data, material_id)
+        @warn "Material '$material_id' not found. Returning an unmodified library copy."
+        return new_library
+    end
+
+    original_material = get(new_library, material_id)
+    changes = Base.structdiff(modification, (id=nothing,))
+
+    modified_material = Material(
+        get(changes, :rho,   original_material.rho),
+        get(changes, :eps_r, original_material.eps_r),
+        get(changes, :mu_r,  original_material.mu_r),
+        get(changes, :T0,    original_material.T0),
+        get(changes, :alpha, original_material.alpha)
+    )
+
+    new_library.data[material_id] = modified_material
+
+    return new_library
+end
+
+
+"""
+    build_new_cable(input_set::NamedTuple) -> Tuple{Float64, Float64, Float64, CableDesign}
+
+Builds and configures a `CableDesign` object based on the parameters provided in the `input_set`.
+
+This function programmatically constructs a detailed cable model, including its conductive
+and insulating layers. It also computes the fundamental electrical parameters (R, L, C)
+for the primary conductor.
+
+# Arguments
+- `input_set::NamedTuple`: A named tuple containing all necessary parameters, such as
+  layer dimensions, material properties, and component definitions.
+
+# Returns
+- `Tuple{BASE_FLOAT, BASE_FLOAT, BASE_FLOAT, CableDesign}`: A tuple containing:
+    - `R`: The resistance of the core conductor (Ω/km).
+    - `L`: The inductance of the core conductor (mH/km).
+    - `C`: The capacitance of the core conductor (μF/km).
+    - `cable_design`: The fully constructed `CableDesign` object.
+"""
+function build_new_cable(input_set::NamedTuple)::Tuple{Float64, Float64, Float64, CableDesign}
+
+    materials = input_set.materials
+
+    #--- Core Conductor ---
+    material_core = get(materials, "copper")
+    core = ConductorGroup(WireArray(0.0, Diameter(input_set.d_w), 1, 0.0, material_core))
+    n_strands = 6 # Strands per layer
+    for i in 1:input_set.n_layers
+        add!(core, WireArray, Diameter(input_set.d_w), i * n_strands, 11.0, material_core)
+    end
+
+    #--- Main Insulation and Semiconductors ---
+    material_sc1 = get(materials, "semicon1")
+    main_insu = InsulatorGroup(Semicon(core, Thickness(input_set.t_sc_in), material_sc1))
+
+    material_pe = get(materials, "polyethylene")
+    add!(main_insu, Semicon, Thickness(input_set.t_ins), material_pe)
+
+    material_sc2 = get(materials, "semicon2")
+    add!(main_insu, Insulator, Thickness(input_set.t_sc_out), material_sc2)
+
+    # Outer semiconductor
+    material = get(materials, "polyacrylate")
+    add!(main_insu, Semicon, Thickness(input_set.t_wbt), material)
+
+    # Group the core components
+    core_cc = CableComponent("core", core, main_insu)
+
+    # Instantiate the CableDesign object
+    cable_design = CableDesign(input_set.cable_id, core_cc, nominal_data=input_set.datasheet_info)
+
+    # SHEATHS
+
+    material = get(materials, "lead")
+    screen_con = ConductorGroup(Tubular(main_insu, Thickness(input_set.t_sc), material))
+
+    material_hdpe = get(materials, "high_density_pe")
+    screen_insu = InsulatorGroup(Insulator(screen_con, Thickness(input_set.t_pe), material_hdpe))
+
+    material_polyprop = get(materials, "polypropylene")
+    add!(screen_insu, Insulator, Thickness(input_set.t_bed), material_polyprop)
+
+    sheath_cc = CableComponent("sheath", screen_con, screen_insu)
+    add!(cable_design, sheath_cc)
+
+    # ARMOR
+    lay_ratio = 10.0 # typical value for wire screens
+    material_steel = get(materials, "steel")
+    armor_con = ConductorGroup(
+        WireArray(screen_insu, Diameter(input_set.d_wa), input_set.num_ar_wires, lay_ratio, material_steel))
+
+    # PP layer after armor:
+    armor_insu = InsulatorGroup(Insulator(armor_con, Thickness(input_set.t_jac), material_polyprop))
+
+    # Assign the armor parts directly to the design:
+    add!(cable_design, "armor", armor_con, armor_insu)
+
+    core_df = DataFrame(cable_design, :baseparams)
+
+    R = core_df[1,:computed]      # Ω/km
+    L = core_df[2,:computed]      # mH/km
+    C = core_df[3,:computed]      # μF/km
+
+    return R, L, C, cable_design
+end
+
+# output_file = fullfile("my_cable.dat")
+# file = generate_atp_file(cable_system, earth_params, file_name=output_file)
+# lis_content = run_dat_file(file)
+# Z = read_data(Val(:atp), lis_content, cable_system)
+# # atp_executable="C:/ATP/tools/runATP.exe"
+# # atp_cmd = `$atp_executable $file`
+
+# # # run(atp_cmd)
+# # output = readchomp(atp_cmd)
+# # display(output)
+# # # println(file)
+# println("File saved to: ", output_file)
+# display(Z)

@@ -63,32 +63,10 @@ input_set = (
     materials = default_lib
 )
     
-
-
-
-
-f = [1e-3] # Near DC frequency for the analysis
-earth_params = EarthModel(f, 100.0, 10.0, 1.0)  # 100 Ω·m resistivity, εr=10, μr=1
-xp, xn, y0 = -0.5, 0.5, -1.0;
-
-# Define runtime options 
-opts = (
-    force_remesh=true,                # Force remeshing
-    force_overwrite=true,             # Overwrite existing files
-    plot_field_maps=false,            # Do not compute/ plot field maps
-    mesh_only=false,                  # Preview the mesh
-    save_path=fullfile("fem_output"), # Results directory
-    keep_run_files=false,              # Archive files after each run
-    verbosity=0,                      # Verbosity
-);
-
-
-
-
-
-
 # Results of base parameters
 R, L, C, cable_design = build_new_cable(input_set)
+# plt1 = preview(cable_design)
+
 
 # Results of base parameters with modification
 custom_materials = rebuild_library((id="semicon1", rho=2000), base_library=default_lib)
@@ -97,23 +75,35 @@ R_mod, L_mod, C_mod, cable_design_mod = build_new_cable(modified_input_set)
 
 cable_design_eq = simplify(cable_design_mod)
 
+f = 1e-3 # Near DC frequency for the analysis
+earth_params = EarthModel([f], 100.0, 10.0, 1.0)  # 100 Ω·m resistivity, εr=10, μr=1
+xp, xn, y0 = -0.5, 0.5, -1.0;
+
+# Initialize the `LineCableSystem` with the first cable (phase A):
 cablepos = CablePosition(cable_design_eq, xp, y0,
     Dict("core" => 1, "sheath" => 0, "armor" => 0))
 cable_system = LineCableSystem(cable_id*"_equivalent", 1000.0, cablepos)
+
+# Add remaining cables (phases B and C):
 add!(cable_system, cable_design_eq, xn, y0,
     Dict("core" => 2, "sheath" => 0, "armor" => 0))
 
+# plt4 = preview(cable_system, zoom_factor=0.15)
+
+#=
+## FEM calculations
+=#
 
 # Define a LineParametersProblem with the cable system and earth model
 problem = LineParametersProblem(
     cable_system,
     temperature=20.0,  # Operating temperature
     earth_props=earth_params,
-    frequencies=f,   # Frequency for the analysis
+    frequencies=[f],   # Frequency for the analysis
 );
 
 # Estimate domain size based on skin depth in the earth
-domain_radius = calc_domain_size(earth_params, f);
+domain_radius = calc_domain_size(earth_params, [f]);
 
 # Define custom mesh transitions around each cable
 mesh_transition1 = MeshTransition(
@@ -126,6 +116,16 @@ mesh_transition1 = MeshTransition(
     n_regions=2)
 
 
+# Define runtime options 
+opts = (
+    force_remesh=true,                # Force remeshing
+    force_overwrite=true,             # Overwrite existing files
+    plot_field_maps=false,            # Do not compute/ plot field maps
+    mesh_only=false,                  # Preview the mesh
+    save_path=fullfile("fem_output"), # Results directory
+    keep_run_files=true,              # Archive files after each run
+    verbosity=0,                      # Verbosity
+);
 
 # Define the FEM formulation with the specified parameters
 formulation = FormulationSet(:FEM,
@@ -155,10 +155,12 @@ file = generate_atp_file(cable_system, earth_params, file_name=output_file)
 lis_content = run_dat_file(file)
 
 
-Z_atp, Y_atp = read_data(Val(:atp), lis_content, cable_system)
 
 
-# # Run the FEM model
-# workspace, line_params = compute!(problem, formulation);
-# Z_fem = line_params.Z[:, :, 1]
-# Y_fem = line_params.Y[:, :, 1]
+Z, Y = read_data(Val(:atp), lis_content, cable_system)
+# result = read_data(Val(:atp), lis_content, cable_system)
+# Y = zeros(ComplexF64, size(Z))
+
+
+# Run the FEM model
+# @time workspace, line_params = compute!(problem, formulation);

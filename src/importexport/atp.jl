@@ -219,20 +219,23 @@ end
 #   file do not match the provided `cable_system` structure.
 # """
 function read_data(::Val{:atp},
-    captured_output::Union{String, SubString{String}}, # Accept both types
+    captured_output::Union{String, SubString{String}},
     cable_system::LineCableSystem
-    )::Union{Array{COMPLEXSCALAR, 2}, Nothing}
+    )::Union{Tuple{Array{COMPLEXSCALAR, 2}, Array{COMPLEXSCALAR, 2}}, Nothing}
     
+    # --- Inner helper function to parse a matrix block (remains robust) ---
     function parse_block(block_lines::Vector{<:AbstractString})
-        data_lines = filter(line -> !isempty(strip(line)), block_lines)
+        is_data_line(line) = !isempty(strip(line)) && !isnothing(tryparse(Float64, split(strip(line))[1]))
+        data_lines = filter(is_data_line, block_lines)
+        
         if isempty(data_lines) return Matrix{ComplexF64}(undef, 0, 0) end
         
         matrix_size = 0
         try
             matrix_size = length(split(data_lines[1]))
         catch
-            @error "Could not determine matrix size from block line: $(data_lines[1])"
-            return nothing
+             @error "Could not determine matrix size from block line: $(data_lines[1])"
+             return nothing
         end
         if matrix_size == 0 return Matrix{ComplexF64}(undef, 0, 0) end
 
@@ -255,34 +258,44 @@ function read_data(::Val{:atp},
         return real_parts + im * imag_parts
     end
 
-    # --- Main Function Logic (Unchanged) ---
+    # --- Main Function Logic with Corrected Delimiters ---
     lines = split(captured_output, '\n')
     
+    # --- Locate all necessary start and end markers precisely ---
     ze_start_idx = findfirst(occursin.("Earth impedance [Ze]", lines))
     zi_start_idx = findfirst(occursin.("Conductor internal impedance [Zi]", lines))
-    
-    if isnothing(ze_start_idx) || isnothing(zi_start_idx)
-        @error "Could not find 'Earth impedance [Ze]' or 'Conductor internal impedance [Zi]' headers in the captured output."
+    zi_end_idx = findfirst(occursin.("Grounding reduces matrix order from", lines)) # Flexible end for Zi
+    yt_start_idx = findfirst(occursin.("Total admittance [Yt]", lines))
+    yt_end_idx = findfirst(occursin.("Characteristic impedance matrix [Zc]", lines))
+
+    if any(isnothing, (ze_start_idx, zi_start_idx, zi_end_idx, yt_start_idx, yt_end_idx))
+        @error "Could not find one or more required matrix delimiters in the captured output."
         return nothing
     end
     
-    # This call now works because parse_block is generic.
+    # --- Parse all three matrices using the correct slices ---
+    # Ze block is between the Ze header and the Zi header
     Ze = parse_block(lines[ze_start_idx + 1 : zi_start_idx - 1])
-    Zi = parse_block(lines[zi_start_idx + 1 : end])
     
-    if isnothing(Ze) || isnothing(Zi) return nothing end
+    # Zi block is between the Zi header and the "Grounding reduces..." line
+    Zi = parse_block(lines[zi_start_idx + 1 : zi_end_idx - 1])
+    
+    # Yt block is between the Yt header and the Zc header
+    Yt = parse_block(lines[yt_start_idx + 1 : yt_end_idx - 1])
 
-    # --- DYNAMIC REORDERING LOGIC (Unchanged) ---
+    if any(isnothing, (Ze, Zi, Yt)) return nothing end
+
+    # --- Dynamic Reordering Logic (Unchanged) ---
     component_counts = [length(c.design_data.components) for c in cable_system.cables]
     total_conductors = sum(component_counts)
-    num_phases = length(component_counts)
-    max_components = isempty(component_counts) ? 0 : maximum(component_counts)
-
-    if size(Ze, 1) != total_conductors
-        @error "Matrix size from output ($(size(Ze,1))x$(size(Ze,1))) does not match total components in cable_system ($total_conductors)."
+    
+    if size(Yt, 1) != length(cable_system.cables) || size(Ze, 1) != total_conductors
+        @error "Matrix size mismatch. Yt($(size(Yt,1))), Ze($(size(Ze,1))), Expected($total_conductors)."
         return nothing
     end
 
+    num_phases = length(component_counts)
+    max_components = isempty(component_counts) ? 0 : maximum(component_counts)
     num_conductors_per_type = [sum(c >= i for c in component_counts) for i in 1:max_components]
     type_offsets = cumsum([0; num_conductors_per_type[1:end-1]])
 
@@ -298,12 +311,14 @@ function read_data(::Val{:atp},
         end
     end
     
-    if isempty(permutation_indices) return Ze + Zi end
+    Z_total = Ze + Zi
+    if isempty(permutation_indices)
+        return Z_total, Yt
+    end
     
-    Ze_reordered = Ze[permutation_indices, permutation_indices]
-    Zi_reordered = Zi[permutation_indices, permutation_indices]
+    Z_reordered = Z_total[permutation_indices, permutation_indices]
     
-    return Ze_reordered + Zi_reordered
+    return Z_reordered, Yt
 end
 
 

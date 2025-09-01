@@ -264,112 +264,51 @@ function archive_frequency_results(workspace::FEMWorkspace, frequency::Float64)
     end
 end
 
-# Run a command, capture stdout+stderr, never throw. Returns (ok::Bool, log::String).
-_run_cmd_capture(cmd::Cmd) = begin
-    io = IOBuffer()
-    ok = success(pipeline(cmd; stdout=io, stderr=io))
-    return ok, String(take!(io))
-end
-
-# Heuristic: does text look like a plain version (e.g., "3.5.0", "3.6")?
-_looks_like_version(s::AbstractString) =
-    occursin(r"^\s*\d+(?:\.\d+){0,2}\s*$", s)
-
-# Parse version from the `-info` output (line like "Version          : 3.5.0")
-function _parse_info_version(info::AbstractString)
-    m = match(r"(?mi)^\s*Version\s*:\s*([0-9]+(?:\.[0-9]+){0,2})\s*$", info)
-    return m === nothing ? nothing : m.captures[1]
-end
-
-function _probe_getdp(exe::AbstractString)
-    tried = String[]
-
-    # 1) Preferred: rich banner via -info
-    infocmd = Cmd(`$exe -info`; windows_verbatim=true)
-    push!(tried, string(infocmd))
-    ok, info = _run_cmd_capture(infocmd)
-    @debug "Probe (-info)" cmd = string(infocmd) ok = ok out_first_200 = first(
-        info,
-        min(lastindex(info), 200),
-    )
-
-    if ok
-        ver = _parse_info_version(info)
-        base = splitpath(exe)[end]
-        mentions_getdp =
-            occursin(r"getdp\.info"i, info) || occursin(r"\bGetDP\b"i, info) ||
-            occursin(r"getdp"i, base)
-        if ver !== nothing && mentions_getdp
-            return true, "info:$ver", tried
-        end
+# Run a command quietly; return true if it starts and exits with code 0.
+_run_ok(cmd::Cmd) =
+    try
+        success(pipeline(cmd; stdout=devnull, stderr=devnull))
+    catch
+        false  # covers "file not found", spawn failures, etc.
     end
 
-    # 2) Fallback: version-only
-    vcmd = Cmd(`$exe -version`; windows_verbatim=true)
-    push!(tried, string(vcmd))
-    vok, vout = _run_cmd_capture(vcmd)
-    @debug "Probe (-version)" cmd = string(vcmd) ok = vok out = vout
-
-    if vok && _looks_like_version(vout)
-        base = splitpath(exe)[end]
-        if occursin(r"getdp"i, base)
-            return true, "version:$vout", tried
-        end
-    end
-
-    return false, "no identifying output", tried
+# Does this path behave like a GetDP executable? 
+_is_valid_getdp_exe(path::AbstractString) = begin
+    @debug "Probing GetDP via -info" path = path
+    _run_ok(`$path -info`)
 end
 
-# Internal helper to find the executable path 
+# Resolve the GetDP path:
+# 1) If user provided :getdp_executable and it runs with -info, use it.
+# 2) Else ask GetDP.jl for its executable and use it if it runs with -info.
+# 3) Else, error.
 function _resolve_getdp_path(opts::NamedTuple)
     user_path = get(opts, :getdp_executable, nothing)
-    @debug "Resolving GetDP path" opts = opts user_path = user_path
+    @debug "Resolving GetDP path (simple probe)" user_path = user_path
 
-    # 1) User override
-    user_path = get(opts, :getdp_executable, nothing)
-    if user_path isa String
-        @debug "User-specified path" path = user_path exists = isfile(user_path)
-        if isfile(user_path)
-            ok, info, tried = _probe_getdp(user_path)
-            if ok
-                @debug "Using user-specified GetDP executable" path = user_path info = info
-                return user_path
-            else
-                @warn "User-specified executable failed identity check" path = user_path tried_cmds = tried info = info
-            end
+    if user_path isa AbstractString
+        if _is_valid_getdp_exe(user_path)
+            @debug "Using user-specified GetDP executable" path = user_path
+            return user_path
         else
-            @warn "User-specified path is not a file" path = user_path
+            @warn "User-specified GetDP executable failed when invoked with -info" path = user_path
         end
     else
         @debug "No user-specified GetDP path"
     end
 
-    # 2) Fallback: query GetDP for its executable path
-    fallback_path = GetDP.get_getdp_executable()
-    @debug "GetDP.get_getdp_executable() returned" path = fallback_path exists = isfile(
-        fallback_path,
-    )
+    fallback = try
+        GetDP.get_getdp_executable()
+    catch
+        nothing
+    end
+    @debug "GetDP.get_getdp_executable() returned" path = fallback
 
-    if isfile(fallback_path)
-        ok, info, tried = _probe_getdp(fallback_path)
-        if ok
-            @debug "Using dependency-provided GetDP executable" path = fallback_path info = info
-            return fallback_path
-        else
-            @warn "Dependency-provided executable failed identity check" path = fallback_path tried_cmds = tried info = info
-        end
+    if fallback isa AbstractString && _is_valid_getdp_exe(fallback)
+        @debug "Using dependency-provided GetDP executable" path = fallback
+        return fallback
     end
 
-    # 3) Last-resort diagnostics
-    path_env = get(ENV, "PATH", "(unset)")
-    gmsh_on_path = Sys.which("gmsh")
-    gmsh_ver =
-        gmsh_on_path === nothing ? "(n/a)" :
-        (last(_run_cmd_capture(Cmd(`$(gmsh_on_path) -version`; windows_verbatim=true))))
-    @debug "Diagnostics before error" PATH = path_env gmsh = gmsh_on_path gmsh_version = gmsh_ver
-
-    Base.error(
-        "GetDP executable not found or not identifiable. " *
-        "Provide :getdp_executable in opts or ensure GetDP.jl package is properly deployed and returns a valid binary.",
-    )
+    error("GetDP executable not found or not working (invocation with -info failed). " *
+          "Provide :getdp_executable in opts or ensure GetDP.jl is properly deployed.")
 end

@@ -274,7 +274,7 @@ Helper function to reconstruct a [`ConductorGroup`](@ref) or [`InsulatorGroup`](
 """
 function _reconstruct_partsgroup(layer_data::Dict)
     if !haskey(layer_data, "__julia_type__")
-        error("Layer data missing '__julia_type__' key: $layer_data")
+        Base.error("Layer data missing '__julia_type__' key: $layer_data")
     end
     type_str = layer_data["__julia_type__"]
     LayerType = _resolve_type(type_str)
@@ -312,7 +312,7 @@ function _reconstruct_partsgroup(layer_data::Dict)
 
     # Check for essential properties common to most first layers
     ismissing(radius_in) &&
-        error("Missing 'radius_in' for first layer type $LayerType in data: $layer_data")
+        Base.error("Missing 'radius_in' for first layer type $LayerType in data: $layer_data")
     ismissing(material_props) && error(
         "Missing 'material_props' for first layer type $LayerType in data: $layer_data",
     )
@@ -348,7 +348,7 @@ function _reconstruct_partsgroup(layer_data::Dict)
             )
         elseif LayerType == Tubular
             radius_ext = get_as(deserialized_layer_dict, :radius_ext, missing, BASE_FLOAT)
-            ismissing(radius_ext) && error("Missing 'radius_ext' for Tubular first layer.")
+            ismissing(radius_ext) && Base.error("Missing 'radius_ext' for Tubular first layer.")
             return Tubular(
                 radius_in, radius_ext, material_props; temperature=temperature)
         elseif LayerType == Strip
@@ -373,7 +373,7 @@ function _reconstruct_partsgroup(layer_data::Dict)
         elseif LayerType == Insulator
             radius_ext = get_as(deserialized_layer_dict, :radius_ext, missing, BASE_FLOAT)
             ismissing(radius_ext) &&
-                error("Missing 'radius_ext' for Insulator first layer.")
+                Base.error("Missing 'radius_ext' for Insulator first layer.")
             return Insulator(
                 radius_in,
                 radius_ext,
@@ -382,10 +382,10 @@ function _reconstruct_partsgroup(layer_data::Dict)
             )
         elseif LayerType == Semicon
             radius_ext = get_as(deserialized_layer_dict, :radius_ext, missing, BASE_FLOAT)
-            ismissing(radius_ext) && error("Missing 'radius_ext' for Semicon first layer.")
+            ismissing(radius_ext) && Base.error("Missing 'radius_ext' for Semicon first layer.")
             return Semicon(radius_in, radius_ext, material_props; temperature=temperature)
         else
-            error("Unsupported layer type for first layer reconstruction: $LayerType")
+            Base.error("Unsupported layer type for first layer reconstruction: $LayerType")
         end
     catch e
         @error "Construction failed for first layer of type $LayerType with data: $deserialized_layer_dict. Error: $e"
@@ -452,7 +452,7 @@ function _reconstruct_cabledesign(
     # 2. Process Components Sequentially
     components_data = get(design_data, "components", [])
     if isempty(components_data) || !(components_data isa AbstractVector)
-        error("Missing or invalid 'components' array in design data for $cable_id")
+        Base.error("Missing or invalid 'components' array in design data for $cable_id")
     end
 
     reconstructed_components = CableComponent[] # Store fully built components
@@ -472,7 +472,7 @@ function _reconstruct_cabledesign(
         cond_layers_data = get(conductor_group_data, "layers", [])
 
         if isempty(cond_layers_data) || !(cond_layers_data isa AbstractVector)
-            error("Component '$comp_id' has missing or invalid conductor group layers.")
+            Base.error("Component '$comp_id' has missing or invalid conductor group layers.")
         end
 
         # - Create the FIRST layer object
@@ -500,7 +500,7 @@ function _reconstruct_cabledesign(
             # Extract Type and necessary arguments for add!
             LayerType = _resolve_type(layer_data["__julia_type__"])
             material_props = get_as(layer_data, "material_props", missing, BASE_FLOAT)
-            material_props isa Material || error("'material_props' must deserialize to Material, got $(typeof(material_props))")
+            material_props isa Material || Base.error("'material_props' must deserialize to Material, got $(typeof(material_props))")
 
             # Prepare args and kwargs based on LayerType for add!
             args = []
@@ -523,17 +523,17 @@ function _reconstruct_cabledesign(
                 elseif LayerType == Tubular
                     radius_ext = get_as(layer_data, "radius_ext", missing, BASE_FLOAT)
                     ismissing(radius_ext) &&
-                        error("Missing 'radius_ext' for Tubular layer $i in $comp_id")
+                        Base.error("Missing 'radius_ext' for Tubular layer $i in $comp_id")
                     args = [radius_ext, material_props]
                 elseif LayerType == Strip
                     radius_ext = get_as(layer_data, "radius_ext", missing, BASE_FLOAT)
                     width = get_as(layer_data, "width", missing, BASE_FLOAT)
                     lay_ratio = get_as(layer_data, "lay_ratio", missing, BASE_FLOAT)
                     any(ismissing, (radius_ext, width, lay_ratio)) &&
-                        error("Missing required field(s) for Strip layer $i in $comp_id")
+                        Base.error("Missing required field(s) for Strip layer $i in $comp_id")
                     args = [radius_ext, width, lay_ratio, material_props]
                 else
-                    error("Unsupported layer type '$LayerType' for add!")
+                    Base.error("Unsupported layer type '$LayerType' for add!")
                 end
 
                 # Call add! with Type, args..., and kwargs...
@@ -554,7 +554,7 @@ function _reconstruct_cabledesign(
         insu_layers_data = get(insulator_group_data, "layers", [])
 
         if isempty(insu_layers_data) || !(insu_layers_data isa AbstractVector)
-            error("Component '$comp_id' has missing or invalid insulator group layers.")
+            Base.error("Component '$comp_id' has missing or invalid insulator group layers.")
         end
 
         # - Create the FIRST layer object
@@ -580,7 +580,7 @@ function _reconstruct_cabledesign(
 
             LayerType = _resolve_type(layer_data["__julia_type__"])
             material_props = get_as(layer_data, "material_props", missing, BASE_FLOAT)
-            material_props isa Material || error("'material_props' must deserialize to Material, got $(typeof(material_props))")
+            material_props isa Material || Base.error("'material_props' must deserialize to Material, got $(typeof(material_props))")
 
 
             args = []
@@ -593,10 +593,10 @@ function _reconstruct_cabledesign(
                 if LayerType in [Semicon, Insulator]
                     radius_ext = get_as(layer_data, "radius_ext", missing, BASE_FLOAT)
                     ismissing(radius_ext) &&
-                        error("Missing 'radius_ext' for $LayerType layer $i in $comp_id")
+                        Base.error("Missing 'radius_ext' for $LayerType layer $i in $comp_id")
                     args = [radius_ext, material_props]
                 else
-                    error("Unsupported layer type '$LayerType' for add!")
+                    Base.error("Unsupported layer type '$LayerType' for add!")
                 end
 
                 # Call add! with Type, args..., and kwargs...
@@ -620,7 +620,7 @@ function _reconstruct_cabledesign(
 
     # 3. Create the final CableDesign object using the first component
     if isempty(reconstructed_components)
-        error("Failed to reconstruct any valid components for cable design '$cable_id'")
+        Base.error("Failed to reconstruct any valid components for cable design '$cable_id'")
     end
     # Use the CableDesign constructor which takes the first component
     cable_design =

@@ -14,7 +14,7 @@ export ConductorGroup, InsulatorGroup
 export CableComponent, CableDesign, NominalData
 export CablesLibrary
 export CablePosition, LineCableSystem
-export trifoil_formation, flat_formation, preview
+export trifoil_formation, flat_formation, preview, simplify
 
 # Earth properties:
 export EarthModel
@@ -49,7 +49,7 @@ using .EarthProps: EarthModel
 
 # Submodule `DataModel`
 include("DataModel.jl")
-using .DataModel: Thickness, Diameter, WireArray, Strip, Tubular, Semicon, Insulator, ConductorGroup, InsulatorGroup, CableComponent, CableDesign, NominalData, CablesLibrary, CablePosition, LineCableSystem, trifoil_formation, flat_formation, preview
+using .DataModel: Thickness, Diameter, WireArray, Strip, Tubular, Semicon, Insulator, ConductorGroup, InsulatorGroup, CableComponent, CableDesign, NominalData, CablesLibrary, CablePosition, LineCableSystem, trifoil_formation, flat_formation, preview, simplify
 
 # Submodule `Engine`
 include("Engine.jl")

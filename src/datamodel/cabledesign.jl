@@ -139,5 +139,51 @@ function add!(
     add!(design, comp)  # may return the same or a promoted design
 end
 
+"""
+$(TYPEDSIGNATURES)
+
+Builds a simplified [`CableDesign`](@ref) by replacing each component with a
+homogeneous equivalent and leverages shorthand constructors:
+
+- `ConductorGroup(component::CableComponent{T}) = ConductorGroup(Tubular(component))`
+- `InsulatorGroup(component::CableComponent{T}) = InsulatorGroup(Insulator(component))`
+
+The geometry is preserved from the original component, while materials are
+derived from the component's effective conductor and insulator properties.
+"""
+function simplify(
+    original_design::CableDesign;
+    new_id::String="",
+)::CableDesign
+
+    if isempty(original_design.components)
+        throw(ArgumentError("CableDesign must contain at least one component."))
+    end
+
+    # Determine the ID for the new equivalent cable.
+    equivalent_id = isempty(new_id) ? original_design.cable_id * "_equivalent" : new_id
+
+    equivalent_design = nothing
+
+    for (i, original_component) in enumerate(original_design.components)
+
+        new_cond_group = ConductorGroup(original_component)
+        new_ins_group = InsulatorGroup(original_component)
+
+        if i == 1
+            new_component = CableComponent(original_component.id, new_cond_group, new_ins_group)
+            equivalent_design = CableDesign(
+                equivalent_id,
+                new_component,
+                nominal_data=original_design.nominal_data,
+            )
+        else
+            add!(equivalent_design, original_component.id, new_cond_group, new_ins_group)
+        end
+    end
+
+    return equivalent_design
+end
+
 include("cabledesign/base.jl")
 include("cabledesign/dataframe.jl")

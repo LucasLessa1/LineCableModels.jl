@@ -9,12 +9,12 @@ macro parameterize(container_expr, union_expr)
         # Core.eval gets the *value* of the symbol passed in (e.g., the actual Union type)
         union_type = Core.eval(__module__, union_expr)
     catch e
-        error("Expression `$union_expr` could not be evaluated. Make sure it's a defined const or type.")
+        Base.error("Expression `$union_expr` could not be evaluated. Make sure it's a defined const or type.")
     end
 
     # Sanity check
     if !(union_type isa Union)
-        error("Second argument must be a Union type. Got a `$(typeof(union_type))` instead.")
+        Base.error("Second argument must be a Union type. Got a `$(typeof(union_type))` instead.")
     end
 
     # Base.uniontypes gets the component types, e.g., (Float64, Measurement{Float64})
@@ -94,7 +94,7 @@ macro measurify(def)
     if def.head == :(=)
         def = MacroTools.longdef(def)
     elseif def.head != :function
-        error("@measurify must wrap a function definition")
+        Base.error("@measurify must wrap a function definition")
     end
     dict = MacroTools.splitdef(def)
 

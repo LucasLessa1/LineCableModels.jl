@@ -114,10 +114,10 @@ mutable struct CableComponent{T<:REALSCALAR}
         G_eq = insulator_group.shunt_conductance
         ε_ins = calc_equivalent_eps(C_eq, r3, r2)
         σ_ins = calc_sigma_lossfact(G_eq, r2, r3)
-        ρ_ins = inv(σ_ins)               # safe if σ_ins ≠ 0 (your tests cover zero?)
-        μ_ins = calc_solenoid_correction(conductor_group.num_turns, r2, r3)
+        ρ_ins = inv(σ_ins)               # safe if σ_ins ≠ 0
+        μ_ins_corr = calc_solenoid_correction(conductor_group.num_turns, r2, r3)
         θ_ins = insulator_group.layers[1].temperature
-        insulator_props = Material{T}(ρ_ins, ε_ins, μ_ins, θ_ins, T(0))
+        insulator_props = Material{T}(ρ_ins, ε_ins, μ_ins_corr, θ_ins, T(0))
 
         return new{T}(
             id,
@@ -157,7 +157,6 @@ function CableComponent(
     return CableComponent{T}(id, cgT, igT)
 end
 
-include("cablecomponent/base.jl")
 
 """
 $(TYPEDSIGNATURES)
@@ -174,9 +173,9 @@ Constructs the equivalent coaxial conductor as a `Tubular` directly from a
 - `Tubular{T}` with radii from `component.conductor_group` and material from
   `component.conductor_props` at the group temperature (fallback to `T0`).
 """
-function Tubular(component::CableComponent{T}) where {T}
+function Tubular(component::CableComponent{T}) where {T<:REALSCALAR}
     cg = component.conductor_group
-    temp = !isempty(cg.layers) ? cg.layers[1].temperature : component.conductor_props.T0
+    temp = component.conductor_props.T0
     return Tubular(cg.radius_in, cg.radius_ext, component.conductor_props, temp)
 end
 
@@ -195,25 +194,48 @@ Constructs the equivalent coaxial insulation as an `Insulator` directly from a
 - `Insulator{T}` with radii from `component.insulator_group` and material from
   `component.insulator_props` at the group temperature (fallback to `T0`).
 """
-function Insulator(component::CableComponent{T}) where {T}
+function Insulator(component::CableComponent{T}) where {T<:REALSCALAR}
     ig = component.insulator_group
-    temp = !isempty(ig.layers) ? ig.layers[1].temperature : component.insulator_props.T0
+    temp = component.insulator_props.T0
     return Insulator(ig.radius_in, ig.radius_ext, component.insulator_props, temp)
 end
 
 """
 $(TYPEDSIGNATURES)
 
-Shorthand to build a `ConductorGroup` from a `CableComponent` by wrapping its
-equivalent `Tubular` part.
+Build a `ConductorGroup` equivalent for a `CableComponent`, preserving
+`num_turns` and `num_wires` from the original group.
+
+Constructs a single-layer `ConductorGroup{T}` from the computed equivalent
+`Tubular(component)`, but carries over bookkeeping fields needed by downstream
+corrections (e.g., solenoid correction using `num_turns`).
 """
-ConductorGroup(component::CableComponent{T}) where {T} = ConductorGroup(Tubular(component))
+function ConductorGroup(component::CableComponent{T}) where {T<:REALSCALAR}
+    orig = component.conductor_group
+    t = Tubular(component)
+    return ConductorGroup{T}(
+        t.radius_in,
+        t.radius_ext,
+        t.cross_section,
+        orig.num_wires,
+        orig.num_turns,
+        t.resistance,
+        t.material_props.alpha,
+        t.gmr,
+        AbstractConductorPart{T}[t],
+    )
+end
 
 """
 $(TYPEDSIGNATURES)
 
-Shorthand to build an `InsulatorGroup` from a `CableComponent` by wrapping its
-equivalent `Insulator` part.
-"""
-InsulatorGroup(component::CableComponent{T}) where {T} = InsulatorGroup(Insulator(component))
+Build an `InsulatorGroup` equivalent for a `CableComponent` while maintaining
+geometric coupling to the equivalent conductor group.
 
+Stacks a single insulating layer of equivalent material and thickness over the
+new conductor group created from the same component.
+"""
+InsulatorGroup(component::CableComponent{T}) where {T<:REALSCALAR} = InsulatorGroup{T}(Insulator(component))
+
+
+include("cablecomponent/base.jl")

@@ -1,6 +1,7 @@
 # Export public API
 export f₀, μ₀, ε₀, ρ₀, T₀, TOL, ΔTmax
 export BASE_FLOAT, REALSCALAR, COMPLEXSCALAR
+# export REALVECTOR, COMPLEXVECTOR
 
 # General constants
 "Base power system frequency, f₀ = 50.0 [Hz]."
@@ -23,3 +24,5 @@ using Measurements: Measurement
 const BASE_FLOAT = Float64
 const REALSCALAR = Union{BASE_FLOAT,Measurement{BASE_FLOAT}}
 const COMPLEXSCALAR = Union{Complex{BASE_FLOAT},Complex{Measurement{BASE_FLOAT}}}
+# const REALVECTOR = Union{Vector{BASE_FLOAT},Vector{Measurement{BASE_FLOAT}}}
+# const COMPLEXVECTOR = Union{Vector{Complex{BASE_FLOAT}},Vector{Complex{Measurement{BASE_FLOAT}}}}

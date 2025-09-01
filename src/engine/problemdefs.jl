@@ -6,15 +6,15 @@ Represents a line parameters computation problem for a given physical cable syst
 
 $(TYPEDFIELDS)
 """
-struct LineParametersProblem <: ProblemDefinition
+struct LineParametersProblem{T<:REALSCALAR} <: ProblemDefinition
     "The physical cable system to analyze."
-    system::LineCableSystem
+    system::LineCableSystem{T}
     "Operating temperature \\[°C\\]."
-    temperature::REALSCALAR
+    temperature::T
     "Earth properties model."
-    earth_props::EarthModel
+    earth_props::EarthModel{T}
     "Frequencies at which to perform the analysis \\[Hz\\]."
-    frequencies::Vector{<:Number}
+    frequencies::Vector{T}
 
     @doc """
     $(TYPEDSIGNATURES)
@@ -133,52 +133,12 @@ struct LineParametersProblem <: ProblemDefinition
             end
         end
 
-        return new(system, temperature, earth_props, frequencies)
+        T = resolve_T(system, temperature, earth_props, frequencies)
+        return new{T}(coerce_to_T(system, T), coerce_to_T(temperature, T), coerce_to_T(earth_props, T), coerce_to_T(frequencies, T))
     end
 end
 
-"""
-$(TYPEDEF)
 
-Represents the frequency-dependent line parameters (series impedance and shunt admittance matrices) for a cable or line system.
-
-$(TYPEDFIELDS)
-"""
-struct LineParameters{T<:COMPLEXSCALAR}
-    "Series impedance matrices \\[Ω/m\\]."
-    Z::Array{T,3}
-    "Shunt admittance matrices \\[S/m\\]."
-    Y::Array{T,3}
-
-    @doc """
-    $(TYPEDSIGNATURES)
-
-    Constructs a [`LineParameters`](@ref) instance.
-
-    # Arguments
-
-    - `Z`: Series impedance matrices \\[Ω/m\\].
-    - `Y`: Shunt admittance matrices \\[S/m\\].
-
-    # Returns
-
-    - A [`LineParameters`](@ref) object with prelocated impedance and admittance matrices.
-
-    # Examples
-
-    ```julia
-    params = $(FUNCTIONNAME)(Z, Y)
-    ```
-    """
-    function LineParameters(Z::Array{T,3}, Y::Array{T,3}) where {T<:COMPLEXSCALAR}
-        # Validate dimensions
-        size(Z, 1) == size(Z, 2) || throw(DimensionMismatch("Z matrix must be square"))
-        size(Y, 1) == size(Y, 2) || throw(DimensionMismatch("Y matrix must be square"))
-        size(Z) == size(Y) || throw(DimensionMismatch("Z and Y must have same dimensions"))
-
-        new{T}(Z, Y)
-    end
-end
 
 @kwdef struct CoaxialOptions <: AbstractFormulationOptions
     "Skip user confirmation for overwriting results"

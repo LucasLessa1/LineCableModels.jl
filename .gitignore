@@ -28,7 +28,6 @@ Manifest.toml
 # the hidden folder of shame
 temp/
 @INPROGRESS/
-legacy/
 
 # Internal files
 dev

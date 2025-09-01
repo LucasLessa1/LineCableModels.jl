@@ -60,7 +60,7 @@ $(FUNCTIONNAME)(5.2 ± 0.3)  # Output: 5.2
 ```
 """
 function to_nominal(x)
-    return x isa Measurement ? Measurements.value(x) : x
+    return x isa Measurement ? value(x) : x
 end
 
 """

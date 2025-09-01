@@ -99,7 +99,7 @@ function _get_material_color(
     mur_norm = (mu_r - mur_min) / (mur_max - mur_min)
 
     # Define color gradients based on resistivity
-    if rho <= 5 * rho_base
+    if rho <= 10 * rho_base
         # Conductors: Bright metallic white → Darker metallic gray (logarithmic scaling)
         rho_norm = log10(rho / rho_base) / log10(5)  # Normalize based on `5 * rho_base`
 
@@ -198,6 +198,7 @@ function preview(
     display_legend=true,
     backend=nothing,
     sz=(800, 600),
+    display_id=false,
 )
     if isnothing(plt)
         # Choose appropriate backend based on environment
@@ -205,7 +206,7 @@ function preview(
         plt = plot(size=sz,
             aspect_ratio=:equal,
             legend=(0.875, 1.0),
-            title="Cable design preview",
+            title=display_id ? "Cable design preview: $(design.cable_id)" : "Cable design preview",
             xlabel="y [m]",
             ylabel="z [m]")
     end
@@ -368,12 +369,13 @@ function preview(
     backend=nothing,
     sz=(800, 600),
     display_plot=true,
+    display_id=false,
 )
     resolve_backend(backend)
     plt = plot(size=sz,
         aspect_ratio=:equal,
         legend=(0.8, 0.9),
-        title="Cable system cross-section",
+        title=display_id ? "Cable system cross-section: $(system.system_id)" : "Cable system cross-section",
         xlabel="y [m]",
         ylabel="z [m]")
 

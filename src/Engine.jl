@@ -25,7 +25,7 @@ $(EXPORTS)
 module Engine
 
 # Export public API
-export LineParametersProblem, LineParameters
+export LineParametersProblem, LineParameters, SeriesImpedance, ShuntAdmittance, per_km, per_m
 export CoaxialFormulation
 
 export compute!
@@ -47,6 +47,7 @@ include("engine/types.jl")
 
 # Problem definitions
 include("engine/problemdefs.jl")
+include("engine/lineparams.jl")
 
 # Submodule `InternalImpedance`
 include("engine/InternalImpedance.jl")
@@ -78,6 +79,10 @@ include("engine/helpers.jl")
 # Workspace definition
 include("engine/workspace.jl")
 
+# include all .jl files from src/legacy if the folder exists
+isdir(joinpath(@__DIR__, "legacy")) && map(f -> endswith(f, ".jl") && include(joinpath(@__DIR__, "legacy", f)),
+    sort(readdir(joinpath(@__DIR__, "legacy"))))
+
 # Computation methods
 include("engine/solver.jl")
 
@@ -86,10 +91,6 @@ include("engine/base.jl")
 
 # Submodule `FEM`
 include("engine/FEM.jl")
-
-# include all .jl files from src/legacy if the folder exists
-isdir(joinpath(@__DIR__, "legacy")) && map(f -> endswith(f, ".jl") && include(joinpath(@__DIR__, "legacy", f)),
-    sort(readdir(joinpath(@__DIR__, "legacy"))))
 
 @reexport using .InternalImpedance, .InsulationImpedance, .EarthImpedance,
     .InsulationAdmittance, .EarthAdmittance, .EHEM

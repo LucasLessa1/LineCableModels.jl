@@ -20,7 +20,7 @@ export trifoil_formation, flat_formation, preview, simplify
 export EarthModel
 
 # Engine:
-export LineParametersProblem, compute!
+export LineParametersProblem, compute!, SeriesImpedance, ShuntAdmittance, per_km, per_m
 
 # Import/Export:
 export export_data, read_data, save, load!
@@ -53,7 +53,7 @@ using .DataModel: Thickness, Diameter, WireArray, Strip, Tubular, Semicon, Insul
 
 # Submodule `Engine`
 include("Engine.jl")
-using .Engine: LineParametersProblem, compute!
+using .Engine: LineParametersProblem, compute!, SeriesImpedance, ShuntAdmittance, per_km, per_m
 
 # Submodule `ImportExport`
 include("ImportExport.jl")

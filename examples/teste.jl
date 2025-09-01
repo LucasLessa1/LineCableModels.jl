@@ -1,36 +1,9 @@
-#=
-# Tutorial 3 - Computing line parameters
-
-This case file demonstrates how to model an armored high-voltage single-core power cable 
-using the [`LineCableModels.jl`](@ref) package. The objective is to build a complete representation of a single-core 525 kV cable with a 1600 mm² copper conductor, 1.2 mm tubular lead sheath and 68 x 6 mm galvanized steel armor, based on the design described in [Karmokar2025](@cite).
-=#
-
-#=
-**Tutorial outline**
-```@contents
-Pages = [
-	"tutorial3.md",
-]
-Depth = 2:3
-```
-=#
-
-#=
-## Introduction
-HVDC cables are constructed around a central conductor enclosed by a triple-extruded insulation system (inner/outer semi-conductive layers and main insulation). A metallic screen and protective outer sheath are then applied for land cables. Subsea designs add galvanized steel wire armor over this structure to provide mechanical strength against water pressure. A reference design for a 525 kV HVDC cable [is shown here](https://nkt.widen.net/content/pnwgwjfudf/pdf/Extruded_DC_525kV_DS_EN_DEHV_HV_DS_DE-EN.pdf).
-=#
-
-#=
-## Getting started
-=#
-
-# Load the package and set up the environment:
-using LineCableModels
-using LineCableModels.Engine.FEM
 using DataFrames
+using LineCableModels
 using Printf
 fullfile(filename) = joinpath(@__DIR__, filename); #hide
 set_logger!(0); #hide
+
 
 # Initialize library and the required materials for this design:
 materials = MaterialsLibrary(add_defaults=true)
@@ -40,33 +13,38 @@ steel = Material(13.8e-8, 1.0, 300.0, 20.0, 0.00450) # Steel
 add!(materials, "steel", steel)
 pp = Material(1e15, 2.8, 1.0, 20.0, 0.0) # Laminated paper propylene
 add!(materials, "pp", pp)
+pe = Material(1e16, 2.3, 0.99, 20.0, 0.0) # high density polyethylene
+add!(materials, "HDPE", pe)
 
 # Inspect the contents of the materials library:
 materials_df = DataFrame(materials)
 
-#=
 ## Cable dimensions
+# Core
+num_co_wires = 61 # number of core wires
+num_ar_wires = 62  # number of armor wires
+d_core = 57.8e-3   # nominal core overall diameter
+d_w = 0.0031915382432114617# 4mm² 12AWG    # nominal strand diameter of the core (minimum value to match datasheet)
+n_layers = 5 # Layers of strands
 
-The cable under consideration is a high-voltage, stranded copper conductor cable with XLPE insulation, water-blocking tape, lead tubular screens, PE inner sheath, PP bedding, steel armor and PP jacket, rated for 525 kV HVDC systems. This information is typically found in the cable datasheet and is based on the design studied in [Karmokar2025](@cite).
+t_sc_in = 1.5e-3     # nominal internal semicon thickness 
+t_ins = 21.3e-3      # nominal main insulation thickness
+t_sc_out = 1.4e-3  # nominal external semicon thickness
 
-The cable is found to have the following configuration:
-=#
+# Sheath
+t_wbt = .7e-3      # nominal thickness of the water blocking tape
+t_sc = 3e-3      # nominal lead screen thickness
+t_pe = 2.5e-3        # nominal PE inner sheath thickness
 
-num_co_wires = 127 # number of core wires
-num_ar_wires = 68  # number of armor wires
-d_core = 0.0463    # nominal core overall diameter
-d_w = 3.6649e-3    # nominal strand diameter of the core (minimum value to match datasheet)
-t_sc_in = 2e-3     # nominal internal semicon thickness 
-t_ins = 26e-3      # nominal main insulation thickness
-t_sc_out = 1.8e-3  # nominal external semicon thickness
-t_wbt = .3e-3      # nominal thickness of the water blocking tape
-t_sc = 3.3e-3      # nominal lead screen thickness
-t_pe = 3e-3        # nominal PE inner sheath thickness
-t_bed = 3e-3       # nominal thickness of the PP bedding
-d_wa = 5.827e-3    # nominal armor wire diameter
-t_jac = 10e-3      # nominal PP jacket thickness
+# Jacket
+t_bed = 0.6e-3       # nominal thickness of the PP bedding
+d_wa = 5e-3    # nominal armor wire diameter
+t_jac = 4e-3      # nominal PP jacket thickness
 
 d_overall = d_core #hide
+
+
+
 layers = [] #hide
 push!(layers, ("Conductor", missing, d_overall * 1000)) #hide
 d_overall += 2 * t_sc_in #hide
@@ -109,7 +87,7 @@ core = ConductorGroup(WireArray(0.0, Diameter(d_w), 1, 0.0, material))
 
 # Add the subsequent layers of wires and inspect the object:
 n_strands = 6 # Strands per layer
-n_layers = 6 # Layers of strands
+
 for i in 1:n_layers
     add!(core, WireArray, Diameter(d_w), i * n_strands, 11.0, material)
 end
@@ -149,12 +127,12 @@ add!(main_insu, Semicon, Thickness(t_wbt), material)
 # Group core-related components:
 core_cc = CableComponent("core", core, main_insu)
 
-cable_id = "525kV_1600mm2"
+cable_id = "525kV_2500mm2"
 datasheet_info = NominalData(
-    designation_code="(N)2XH(F)RK2Y",
+    designation_code="SingleCoreSubmarineLeadSheath",
     U0=500.0,                        # Phase (pole)-to-ground voltage [kV]
     U=525.0,                         # Phase (pole)-to-phase (pole) voltage [kV]
-    conductor_cross_section=1600.0,  # [mm²]
+    conductor_cross_section=2500.0,  # [mm²]
     screen_cross_section=1000.0,     # [mm²]
     resistance=nothing,              # DC resistance [Ω/km]
     capacitance=nothing,             # Capacitance [μF/km]
@@ -172,7 +150,7 @@ material = get(materials, "lead")
 screen_con = ConductorGroup(Tubular(main_insu, Thickness(t_sc), material))
 
 # PE inner sheath:
-material = get(materials, "pe")
+material = get(materials, "HDPE")
 screen_insu = InsulatorGroup(Insulator(screen_con, Thickness(t_pe), material))
 
 # PP bedding:
@@ -242,8 +220,8 @@ save(library, file_name=library_file);
 Define a constant frequency earth model:
 =#
 
-f = [1e-3] # Near DC frequency for the analysis
-earth_params = EarthModel(f, 100.0, 10.0, 1.0)  # 100 Ω·m resistivity, εr=10, μr=1
+f = 1e-3 # Near DC frequency for the analysis
+earth_params = EarthModel([f], 100.0, 10.0, 1.0)  # 100 Ω·m resistivity, εr=10, μr=1
 
 # Earth model base (DC) properties:
 earthmodel_df = DataFrame(earth_params)
@@ -275,102 +253,4 @@ In this section the complete bipole cable system is examined.
 system_df = DataFrame(cable_system)
 
 # Visualize the cross-section of the three-phase system:
-plt4 = preview(cable_system, zoom_factor=0.15)
-
-#=
-## PSCAD & ATPDraw export
-Export to PSCAD input file:
-=#
-
-output_file = fullfile("pscad_export.pscx")
-export_file = export_data(:pscad, cable_system, earth_params, file_name=output_file);
-
-# Export to ATPDraw project file (XML):
-output_file = fullfile("atp_export.xml")
-export_file = export_data(:atp, cable_system, earth_params, file_name=output_file);
-
-#=
-## FEM calculations
-=#
-
-# Define a LineParametersProblem with the cable system and earth model
-problem = LineParametersProblem(
-    cable_system,
-    temperature=20.0,  # Operating temperature
-    earth_props=earth_params,
-    frequencies=f,   # Frequency for the analysis
-);
-
-# Estimate domain size based on skin depth in the earth
-domain_radius = calc_domain_size(earth_params, f);
-
-# Define custom mesh transitions around each cable
-mesh_transition1 = MeshTransition(
-    cable_system,
-    [1],
-    r_min=0.08,
-    r_length=0.25,
-    mesh_factor_min=0.01 / (domain_radius / 5),
-    mesh_factor_max=0.25 / (domain_radius / 5),
-    n_regions=5)
-
-mesh_transition2 = MeshTransition(
-    cable_system,
-    [2],
-    r_min=0.08,
-    r_length=0.25,
-    mesh_factor_min=0.01 / (domain_radius / 5),
-    mesh_factor_max=0.25 / (domain_radius / 5),
-    n_regions=5);
-
-# Define runtime options 
-opts = (
-    force_remesh=true,                # Force remeshing
-    force_overwrite=true,             # Overwrite existing files
-    plot_field_maps=false,            # Do not compute/ plot field maps
-    mesh_only=false,                  # Preview the mesh
-    save_path=fullfile("fem_output"), # Results directory
-    keep_run_files=true,              # Archive files after each run
-    verbosity=0,                      # Verbosity
-);
-
-# Define the FEM formulation with the specified parameters
-formulation = FormulationSet(:FEM,
-    impedance=Darwin(),
-    admittance=Electrodynamics(),
-    domain_radius=domain_radius,
-    domain_radius_inf=domain_radius * 1.25,
-    elements_per_length_conductor=1,
-    elements_per_length_insulator=2,
-    elements_per_length_semicon=1,
-    elements_per_length_interfaces=5,
-    points_per_circumference=16,
-    mesh_size_min=1e-6,
-    mesh_size_max=domain_radius / 5,
-    mesh_transitions=[mesh_transition1,
-        mesh_transition2],
-    mesh_size_default=domain_radius / 10,
-    mesh_algorithm=5,
-    mesh_max_retries=20,
-    materials=materials,
-    options=opts
-);
-
-# # Run the FEM model
-# @time workspace, line_params = compute!(problem, formulation);
-
-# # Display primary core results
-# if !opts.mesh_only
-#     Z = line_params.Z[1, 1, 1]
-#     Y = line_params.Y[1, 1, 1]
-#     R = real(Z) * 1000
-#     L = imag(Z) / (2π * f[1]) * 1e6
-#     C = imag(Y) / (2π * f[1]) * 1e9
-#     println("R = $(@sprintf("%.6g", R)) Ω/km")
-#     println("L = $(@sprintf("%.6g", L)) mH/km")
-#     println("C = $(@sprintf("%.6g", C)) μF/km")
-# end
-
-# # Export ZY matrices to ATPDraw
-# output_file = fullfile("ZY_export.xml")
-# export_file = export_data(:atp, line_params, f; file_name=output_file, cable_system=cable_system);
+# plt4 = preview(cable_system, zoom_factor=0.15)

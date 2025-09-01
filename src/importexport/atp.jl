@@ -198,7 +198,7 @@ end
 
 # TODO: Develop `.lis` import and tests
 # Issue URL: https://github.com/Electa-Git/LineCableModels.jl/issues/12
-function read_data end
+# function read_data end
 # I TEST THEREFORE I EXIST
 # I DON´T TEST THEREFORE GO TO THE GARBAGE 
 # """
@@ -218,91 +218,93 @@ function read_data end
 # - `nothing`: If the file cannot be found, parsed, or if the matrix dimensions in the
 #   file do not match the provided `cable_system` structure.
 # """
-# function read_data(::Val{:atp},
-#     cable_system::LineCableSystem,
-#     freq::AbstractFloat;
-#     file_name::String="$(cable_system.system_id)_1.lis"
-# )::Union{Array{COMPLEXSCALAR,2},Nothing}
-#     # --- Inner helper function to parse a matrix block from text lines ---
-#     function parse_block(block_lines::Vector{String})
-#         data_lines = filter(line -> !isempty(strip(line)), block_lines)
-#         if isempty(data_lines)
-#             return Matrix{ComplexF64}(undef, 0, 0)
-#         end
-#         matrix_size = length(split(data_lines[1]))
-#         real_parts = zeros(Float64, matrix_size, matrix_size)
-#         imag_parts = zeros(Float64, matrix_size, matrix_size)
-#         row_counter = 1
-#         for i in 1:2:length(data_lines)
-#             if i + 1 > length(data_lines)
-#                 break
-#             end
-#             real_line, imag_line = data_lines[i], data_lines[i+1]
-#             try
-#                 real_parts[row_counter, :] = [parse(Float64, s) for s in split(real_line)[1:matrix_size]]
-#                 imag_parts[row_counter, :] = [parse(Float64, s) for s in split(imag_line)[1:matrix_size]]
-#             catch e
-#                 @error "Parsing failed" exception = (e, catch_backtrace())
-#                 return nothing
-#             end
-#             row_counter += 1
-#             if row_counter > matrix_size
-#                 break
-#             end
-#         end
-#         return real_parts + im * imag_parts
-#     end
+function read_data(::Val{:atp},
+    captured_output::Union{String, SubString{String}}, # Accept both types
+    cable_system::LineCableSystem
+    )::Union{Array{COMPLEXSCALAR, 2}, Nothing}
+    
+    function parse_block(block_lines::Vector{<:AbstractString})
+        data_lines = filter(line -> !isempty(strip(line)), block_lines)
+        if isempty(data_lines) return Matrix{ComplexF64}(undef, 0, 0) end
+        
+        matrix_size = 0
+        try
+            matrix_size = length(split(data_lines[1]))
+        catch
+            @error "Could not determine matrix size from block line: $(data_lines[1])"
+            return nothing
+        end
+        if matrix_size == 0 return Matrix{ComplexF64}(undef, 0, 0) end
 
-#     # --- Main Function Logic ---
-#     if !isfile(file_name)
-#         @error "File not found: $file_name"
-#         return nothing
-#     end
-#     lines = readlines(file_name)
-#     ze_start_idx = findfirst(occursin.("Earth impedance [Ze]", lines))
-#     zi_start_idx = findfirst(occursin.("Conductor internal impedance [Zi]", lines))
-#     if isnothing(ze_start_idx) || isnothing(zi_start_idx)
-#         @error "Could not find Ze/Zi headers."
-#         return nothing
-#     end
+        real_parts = zeros(Float64, matrix_size, matrix_size)
+        imag_parts = zeros(Float64, matrix_size, matrix_size)
+        row_counter = 1
+        
+        for i in 1:2:length(data_lines)
+            if i + 1 > length(data_lines) || row_counter > matrix_size break end
+            real_line, imag_line = data_lines[i], data_lines[i+1]
+            try
+                real_parts[row_counter, :] = [parse(Float64, s) for s in split(real_line)[1:matrix_size]]
+                imag_parts[row_counter, :] = [parse(Float64, s) for s in split(imag_line)[1:matrix_size]]
+            catch e
+                @error "Parsing failed on row $row_counter" exception=(e, catch_backtrace())
+                return nothing
+            end
+            row_counter += 1
+        end
+        return real_parts + im * imag_parts
+    end
 
-#     Ze = parse_block(lines[ze_start_idx+1:zi_start_idx-1])
-#     Zi = parse_block(lines[zi_start_idx+1:end])
-#     if isnothing(Ze) || isnothing(Zi)
-#         return nothing
-#     end
+    # --- Main Function Logic (Unchanged) ---
+    lines = split(captured_output, '\n')
+    
+    ze_start_idx = findfirst(occursin.("Earth impedance [Ze]", lines))
+    zi_start_idx = findfirst(occursin.("Conductor internal impedance [Zi]", lines))
+    
+    if isnothing(ze_start_idx) || isnothing(zi_start_idx)
+        @error "Could not find 'Earth impedance [Ze]' or 'Conductor internal impedance [Zi]' headers in the captured output."
+        return nothing
+    end
+    
+    # This call now works because parse_block is generic.
+    Ze = parse_block(lines[ze_start_idx + 1 : zi_start_idx - 1])
+    Zi = parse_block(lines[zi_start_idx + 1 : end])
+    
+    if isnothing(Ze) || isnothing(Zi) return nothing end
 
-#     # --- DYNAMICALLY GENERATE PERMUTATION INDICES (Numerical Method) ---
-#     component_counts = [length(c.design_data.components) for c in cable_system.cables]
-#     total_conductors = sum(component_counts)
-#     num_phases = length(component_counts)
-#     max_components = isempty(component_counts) ? 0 : maximum(component_counts)
+    # --- DYNAMIC REORDERING LOGIC (Unchanged) ---
+    component_counts = [length(c.design_data.components) for c in cable_system.cables]
+    total_conductors = sum(component_counts)
+    num_phases = length(component_counts)
+    max_components = isempty(component_counts) ? 0 : maximum(component_counts)
 
-#     if size(Ze, 1) != total_conductors
-#         @error "Matrix size from file ($(size(Ze,1))x$(size(Ze,1))) does not match total components in cable_system ($total_conductors)."
-#         return nothing
-#     end
+    if size(Ze, 1) != total_conductors
+        @error "Matrix size from output ($(size(Ze,1))x$(size(Ze,1))) does not match total components in cable_system ($total_conductors)."
+        return nothing
+    end
 
-#     num_conductors_per_type = [sum(c >= i for c in component_counts) for i in 1:max_components]
-#     type_offsets = cumsum([0; num_conductors_per_type[1:end-1]])
+    num_conductors_per_type = [sum(c >= i for c in component_counts) for i in 1:max_components]
+    type_offsets = cumsum([0; num_conductors_per_type[1:end-1]])
 
-#     permutation_indices = Int[]
-#     sizehint!(permutation_indices, total_conductors)
-#     instance_counters = ones(Int, max_components)
-#     for phase_idx in 1:num_phases
-#         for comp_type_idx in 1:component_counts[phase_idx]
-#             instance = instance_counters[comp_type_idx]
-#             original_idx = type_offsets[comp_type_idx] + instance
-#             push!(permutation_indices, original_idx)
-#             instance_counters[comp_type_idx] += 1
-#         end
-#     end
-
-#     Ze_reordered = Ze[permutation_indices, permutation_indices]
-#     Zi_reordered = Zi[permutation_indices, permutation_indices]
-
-#     return Ze_reordered + Zi_reordered
-# end
+    permutation_indices = Int[]
+    sizehint!(permutation_indices, total_conductors)
+    instance_counters = ones(Int, max_components)
+    for phase_idx in 1:num_phases
+        for comp_type_idx in 1:component_counts[phase_idx]
+            instance = instance_counters[comp_type_idx]
+            original_idx = type_offsets[comp_type_idx] + instance
+            push!(permutation_indices, original_idx)
+            instance_counters[comp_type_idx] += 1
+        end
+    end
+    
+    if isempty(permutation_indices) return Ze + Zi end
+    
+    Ze_reordered = Ze[permutation_indices, permutation_indices]
+    Zi_reordered = Zi[permutation_indices, permutation_indices]
+    
+    return Ze_reordered + Zi_reordered
+end
 
 
 """$(TYPEDSIGNATURES)

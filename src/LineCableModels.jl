@@ -23,7 +23,7 @@ export EarthModel
 export LineParametersProblem, compute!
 
 # Import/Export:
-export export_data, save, load!
+export export_data, read_data, save, load!
 # -------------------------------------------------------------------------
 
 import DocStringExtensions: DocStringExtensions

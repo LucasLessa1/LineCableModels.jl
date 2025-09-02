@@ -1,8 +1,8 @@
 using LineCableModels
 using LineCableModels.Engine
 using LineCableModels.Engine.FEM
-# using Printf
-# using Measurements
+using Printf
+using Measurements
 
 fullfile(filename) = joinpath(@__DIR__, filename); #hide
 

@@ -8,16 +8,6 @@ Base.eltype(::Type{LineParameters{T}}) where {T} = T
 Base.eltype(::CoaxialWorkspace{T}) where {T} = T
 Base.eltype(::Type{CoaxialWorkspace{T}}) where {T} = T
 
-# Pretty printing with uncertainty information if present
-function Base.show(io::IO, params::LineParameters{T}) where {T}
-    n_cond, _, n_freq = size(params.Z)
-    print(io, "LineParameters with $(n_cond) conductors at $(n_freq) frequencies")
-    if T <: Complex{Measurement{Float64}}
-        print(io, " (with uncertainties)")
-    end
-end
-
-
 
 abstract type UnitLen end
 struct PerMeter <: UnitLen end
@@ -80,40 +70,26 @@ end
 
 _format_complex(io, z, tol) = begin
     # z may be Complex{<:Real} or Complex{<:Measurement}
-    print(io, "(")
+    print(io, "")
     if z.re isa Real
         _format_real(io, real(z), tol)
     else
         _format_meas(io, real(z), tol)
     end
-    print(io, ")+(")
+    print(io, "+")
     if z.im isa Real
         _format_real(io, imag(z), tol)
     else
         _format_meas(io, imag(z), tol)
     end
-    print(io, ")im")
+    print(io, "im")
 end
 
 _format_any(io, x, tol) = x isa Complex ? _format_complex(io, x, tol) :
                           x isa Measurements.Measurement ? _format_meas(io, x, tol) :
                           _format_real(io, x, tol)
 
-# # Pretty 2D matrix printer (no allocations beyond strings)
-# function _show_matrix(io::IO, A::AbstractArray; tol::Float64)
-#     n1, n2 = size(A, 1), size(A, 2)
-#     for i in 1:n1
-#         for j in 1:n2
-#             if j > 1
-#                 print(io, "  ")
-#             end
-#             _format_any(io, A[i, j], tol)
-#         end
-#         if i < n1
-#             print(io, '\n')
-#         end
-#     end
-# end
+
 
 # --- Show methods --------------------------------------------------------------
 
@@ -137,7 +113,7 @@ function Base.show(io::IO, ::MIME"text/plain", rv::ResultsView)
     _, _, nf = size(lp.Z)
 
     print(io, "LineParameters ResultsView  |  mode = ")
-    print(io, rv.mode isa AsZY ? "ZY" : "RLCG @ ω=$(rv.mode.ω)")
+    print(io, rv.mode isa AsZY ? "ZY" : @sprintf("RLCG @ ω=%.6g", rv.mode.ω))
     print(io, "  |  units per ", ulabel, "  |  tol = ", tol, "\n")
 
     @views for k in 1:nf
@@ -237,5 +213,48 @@ function per_m(lp::LineParameters, k::Integer;
         return resultsview(lpk; per=:m, mode=:RLCG, ω=ωv, tol=tol)
     else
         throw(ArgumentError("mode must be :ZY or :RLCG"))
+    end
+end
+
+# Helper: detect uncertainties in element type
+_has_uncertainty_type(::Type{Complex{S}}) where {S} = S <: Measurement
+_has_uncertainty_type(::Type) = false
+
+# Terse summary (used inside collections)
+function Base.show(io::IO, lp::LineParameters)
+    n, _, nf = size(lp.Z)
+    T = eltype(lp.Z)
+    print(io, "LineParameters{$(T)} ", n, "×", n, "×", nf, "  [Z:Ω/m, Y:S/m]")
+    _has_uncertainty_type(T) && print(io, " (±)")
+end
+
+# Pretty REPL display
+function Base.show(io::IO, ::MIME"text/plain", lp::LineParameters)
+    n, _, nf = size(lp.Z)
+    T = eltype(lp.Z)
+    tol = sqrt(eps(Float64))
+    scale = 1_000.0   # per km preview
+    ulabel = "km"
+
+    print(io, "LineParameters  |  n = ", n, "  |  nf = ", nf,
+        "  |  eltype = ", T)
+    _has_uncertainty_type(T) && print(io, "  |  uncertainties: yes")
+    print(io, "\n")
+
+    # Preview: slice 1, per km, Z then Y
+    @views begin
+        Z1 = view(lp.Z.values, :, :, 1)
+        Y1 = view(lp.Y.values, :, :, 1)
+
+        println(io, "\nPreview (slice 1/", nf, ")  per ", ulabel)
+        println(io, "Z [Ω/", ulabel, "] =")
+        _show_matrix(io, Z1; tol=tol, map=x -> scale * x)
+
+        print(io, "\n\nY [S/", ulabel, "] =\n")
+        _show_matrix(io, Y1; tol=tol, map=x -> scale * x)
+    end
+
+    if nf > 1
+        print(io, "\n\n… (", nf - 1, " more frequency slice", nf - 1 == 1 ? "" : "s", ")")
     end
 end

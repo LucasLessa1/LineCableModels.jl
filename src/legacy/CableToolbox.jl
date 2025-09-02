@@ -1081,7 +1081,7 @@ function compute_frequency_dependent_soil_props(
             sigma_g_total[:, l] .= sigma_g .* ones(siz)
         else
             Base.error("Currently only constant properties (CP) soil models are available.") #TODO: port CIGRE and Longmire-Smith models
-                                                                                             #Issue URL: https://github.com/Electa-Git/LineCableModels.jl/issues/15
+            #Issue URL: https://github.com/Electa-Git/LineCableModels.jl/issues/15
         end
 
         # Calculate absolute permittivity (ε = ε₀ * εr)

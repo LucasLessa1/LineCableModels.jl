@@ -136,8 +136,8 @@
         workspace, line_params = compute!(problem, formulation)
 
         @test line_params isa LineParameters
-        @test size(line_params.Z) == (6, 6, 1)
-        @test size(line_params.Y) == (6, 6, 1)
+        @test size(line_params.Z) == (2, 2, 1)
+        @test size(line_params.Y) == (2, 2, 1)
 
         R = real(line_params.Z[1, 1, 1]) * 1000
         L = imag(line_params.Z[1, 1, 1]) / (2π * f) * 1e6

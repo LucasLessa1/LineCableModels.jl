@@ -33,6 +33,7 @@ using ...Materials
 using ...EarthProps
 using ...DataModel
 using ...Engine
+import ...Engine: _do_kron
 import ...DataModel: AbstractCablePart, AbstractConductorPart, AbstractInsulatorPart
 import ..Engine: AbstractFormulationSet, AbstractFormulationOptions, AbstractImpedanceFormulation, AbstractAdmittanceFormulation, compute!
 using ...Utils: display_path, set_logger!, is_headless, to_nominal

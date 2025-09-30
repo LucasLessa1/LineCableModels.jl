@@ -115,7 +115,10 @@ function set_backend!(backend::Symbol; force::Bool = false)
 		ArgumentError("Unknown backend: $(backend). Valid: $(collect(keys(_BACKENDS)))"),
 	)
 	if backend != :cairo && !backend_available(backend)
-		@warn "Backend $(last(_BACKENDS[backend])) not in environment; using :cairo."
+		if !is_headless()
+			@warn "Backend $(last(_BACKENDS[backend])) not in environment; using :cairo."
+		end
+
 		return _activate_backend!(:cairo)
 	end
 	return _activate_backend!(backend; allow_interactive_in_headless = force)

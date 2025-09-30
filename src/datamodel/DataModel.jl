@@ -61,6 +61,10 @@ include("radii.jl")
 include("baseparams/BaseParams.jl")
 using .BaseParams
 
+# Submodule `WirePatterns`
+include("wirepatterns/WirePatterns.jl")
+using .WirePatterns
+
 # Constructors
 include("macros.jl")
 include("validation.jl")

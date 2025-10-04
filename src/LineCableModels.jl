@@ -26,7 +26,7 @@ export LineParametersProblem,
 
 # Parametric builder:
 export make_stranded, make_screened
-export conductor, insulator
+# export conductor, insulator
 
 # Import/Export:
 export export_data, save, load!
@@ -76,7 +76,6 @@ using .Engine: LineParametersProblem, compute!, SeriesImpedance, ShuntAdmittance
 
 # Submodule `ParametricBuilder`
 include("parametricbuilder/ParametricBuilder.jl")
-using .ParametricBuilder: conductor, insulator
 
 # Submodule `ImportExport`
 include("importexport/ImportExport.jl")

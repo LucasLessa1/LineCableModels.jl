@@ -1,15 +1,15 @@
-struct eigLM <: AbstractTransformFormulation
+struct Levenberg <: AbstractTransformFormulation
 	tol::BASE_FLOAT
 end
 
 const LMTOL = 1e-8  # default LM tolerance
 
 # Convenient ctor
-eigLM(; tol::U = U(LMTOL)) where {U <: REALSCALAR} =
-	eigLM(BASE_FLOAT(tol))  # explicit downcast to Float64
+Levenberg(; tol::U = U(LMTOL)) where {U <: REALSCALAR} =
+	Levenberg(BASE_FLOAT(tol))  # explicit downcast to Float64
 
 get_description(
-	::eigLM,
+	::Levenberg,
 ) = "Levenberg–Marquardt (frequency-tracked eigen decomposition)"
 
 """
@@ -23,7 +23,7 @@ transformation matrices and a **modal-domain** `LineParameters` holding the
 # Arguments
 
 - `lp`: Phase-domain line parameters (series `Z`, shunt `Y`, and `f`).
-- `f::eigLM`: Functor with solver tolerance.
+- `f::Levenberg`: Functor with solver tolerance.
 
 # Returns
 
@@ -38,7 +38,7 @@ transformation matrices and a **modal-domain** `LineParameters` holding the
 - Rotation `rot!` is applied per frequency to minimize the imaginary part of each column
   (Gustavsen’s scheme), stabilizing mode identity across the sweep.
 """
-function (f::eigLM)(lp::LineParameters)
+function (f::Levenberg)(lp::LineParameters)
 	n, n2, nfreq = size(lp.Z.values)
 	n == n2 || throw(DimensionMismatch("Z must be square"))
 	size(lp.Y.values) == (n, n, nfreq) || throw(DimensionMismatch("Y must be n×n×nfreq"))

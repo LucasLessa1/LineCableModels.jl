@@ -3,6 +3,7 @@ module ParametricBuilder
 # Export public API
 export make_stranded, make_screened
 export Conductor, Insulator, Material
+export cardinality, show_trace
 
 # Module-specific dependencies
 using ..Commons
@@ -43,12 +44,12 @@ end
 MaterialSpec(; rho, eps_r, mu_r, T0, alpha) = MaterialSpec(rho, eps_r, mu_r, T0, alpha)
 
 # --- 1) Ad-hoc numeric: values (or (value,pct)) ---
-Material(; rho, eps = 1.0, mu = 1.0, T = 20.0, alpha = 0.0) =
+Material(; rho, eps_r = 1.0, mu_r = 1.0, T0 = 20.0, alpha = 0.0) =
 	MaterialSpec(
 		rho = _spec(rho),
-		eps_r = _spec(eps),
-		mu_r = _spec(mu),
-		T0 = _spec(T),
+		eps_r = _spec(eps_r),
+		mu_r = _spec(mu_r),
+		T0 = _spec(T0),
 		alpha = _spec(alpha),
 	)
 
@@ -56,16 +57,16 @@ Material(; rho, eps = 1.0, mu = 1.0, T = 20.0, alpha = 0.0) =
 function Material(
 	m::Materials.Material;
 	rho = nothing,
-	eps = nothing,
-	mu = nothing,
-	T = nothing,
+	eps_r = nothing,
+	mu_r = nothing,
+	T0 = nothing,
 	alpha = nothing,
 )
 	MaterialSpec(
 		rho   = _pair_from_nominal(m.rho, rho),
-		eps_r = _pair_from_nominal(m.eps_r, eps),
-		mu_r  = _pair_from_nominal(m.mu_r, mu),
-		T0    = _pair_from_nominal(m.T0, T),
+		eps_r = _pair_from_nominal(m.eps_r, eps_r),
+		mu_r  = _pair_from_nominal(m.mu_r, mu_r),
+		T0    = _pair_from_nominal(m.T0, T0),
 		alpha = _pair_from_nominal(m.alpha, alpha),
 	)
 end
@@ -153,6 +154,27 @@ function CableBuilderSpec(id::AbstractString, parts...; nominal = nothing)
 	end
 	return CableBuilderSpec(String(id), acc, nominal)
 end
+
+struct PartChoice
+	idx::Int                  # index in ps vector (1-based)
+	role::Symbol              # :cond or :insu
+	T::Type
+	dim::Any                  # chosen scalar (Diameter/Thickness proxy input)
+	args::Tuple               # chosen positional args (scalars)
+	mat::Materials.Material   # concrete material used
+	layers::Int               # n_layers replicated with that choice
+end
+
+struct ComponentTrace
+	name::String
+	choices::Vector{PartChoice}
+end
+
+struct DesignTrace
+	cable_id::String
+	components::Vector{ComponentTrace}
+end
+
 
 # ----- realizers -----
 _values(x::Number) = (x,)
@@ -269,7 +291,6 @@ function _add_insulator!(
 	add!(ig, T, DataModel.Thickness(dim_val), args_pos..., mat)
 end
 
-
 # Build all variants of ONE component, anchored at `base` (0.0 for the very first)
 function _make_variants(ps::Vector{PartSpec}, base)
 	cond = [p for p in ps if p.part_type <: DataModel.AbstractConductorPart]
@@ -277,56 +298,167 @@ function _make_variants(ps::Vector{PartSpec}, base)
 	isempty(cond) && error("component has no conductors")
 	isempty(insu) && error("component has no insulators")
 
-	variants = Tuple{DataModel.CableComponent, DataModel.InsulatorGroup}[]
+	variants = Tuple{DataModel.CableComponent, DataModel.InsulatorGroup, ComponentTrace}[]
 
-	# --- conductors ---
-	p1c   = cond[1]
-	mats1 = _make_range(p1c.material)
-	dims1 = _make_range(p1c.dim[1]; pct = p1c.dim[2])
+	# ---------------- first conductor choice spaces ----------------
+	p1c    = cond[1]
+	mats1  = _make_range(p1c.material)
+	dims1  = _make_range(p1c.dim[1]; pct = p1c.dim[2])
+	args1s = collect(_expand_args(p1c.args))  # Vector{<:Tuple}
 
-	for mat1 in mats1, d1 in dims1, a1 in _expand_args(p1c.args)
+	# remaining conductors — spaces, with COUPLING flags to p1c
+	# Tuple layout: (pc, mcs_or_nothing, dcs_or_nothing, acs_or_nothing)
+	rest_cond_spaces = Tuple{PartSpec, Any, Union{Nothing, Any}, Union{Nothing, Any}}[]
+	for pc in cond[2:end]
+		same_mat  = (pc.material == p1c.material)
+		same_dim  = (pc.dim == p1c.dim)
+		same_args = (pc.args == p1c.args)
+
+		mcs = same_mat ? nothing : _make_range(pc.material)
+		dcs = same_dim ? nothing : _make_range(pc.dim[1]; pct = pc.dim[2])
+		acs = same_args ? nothing : collect(_expand_args(pc.args))
+
+		push!(rest_cond_spaces, (pc, mcs, dcs, acs))
+	end
+
+	# ---------------- first insulator choice spaces ----------------
+	p1i    = insu[1]
+	matsi  = _make_range(p1i.material)
+	dimsi  = _make_range(p1i.dim[1]; pct = p1i.dim[2])
+	args1i = collect(_expand_args(p1i.args))
+
+	# remaining insulators — spaces, with COUPLING flags to p1i
+	rest_ins_spaces = Tuple{PartSpec, Any, Union{Nothing, Any}, Union{Nothing, Any}}[]
+	for pi in insu[2:end]
+		same_mat  = (pi.material == p1i.material)
+		same_dim  = (pi.dim == p1i.dim)
+		same_args = (pi.args == p1i.args)
+
+		m2 = same_mat ? nothing : _make_range(pi.material)
+		d2 = same_dim ? nothing : _make_range(pi.dim[1]; pct = pi.dim[2])
+		a2 = same_args ? nothing : collect(_expand_args(pi.args))
+
+		push!(rest_ins_spaces, (pi, m2, d2, a2))
+	end
+
+	# ---------------- selection stacks (resolved tuples) -------------
+	# chosen_c stores (pc, mc, dc, ac)
+	# chosen_i stores (pi, m2i, d2i, a2i)
+	chosen_c = Vector{NTuple{4, Any}}()
+	chosen_i = Vector{NTuple{4, Any}}()
+
+	# ---------------- build with current resolved choices ------------
+	function build_with_current_selection(mat1, d1, a1, mi, di, ai)
+		# 1) conductors
 		cg = _init_cg(p1c.part_type, base, d1, a1, mat1; abs_first = base == 0.0)
-		for k ∈ 2:p1c.n_layers, a in _expand_args(p1c.args)
-			_add_conductor!(cg, p1c.part_type, d1, a, mat1; layer = k)
+		for k in 2:p1c.n_layers
+			_add_conductor!(cg, p1c.part_type, d1, a1, mat1; layer = k)
 		end
-		# remaining conductor specs
-		for pc in cond[2:end]
-			matsc = _make_range(pc.material);
-			dimsc = _make_range(pc.dim[1]; pct = pc.dim[2])
-			for mc in matsc,
-				dc in dimsc,
-				a in _expand_args(pc.args),
-				k ∈ 1:pc.n_layers
-
-				_add_conductor!(cg, pc.part_type, dc, a, mc; layer = k)
+		for (pc, mc, dc, ac) in chosen_c
+			for k in 1:pc.n_layers
+				_add_conductor!(cg, pc.part_type, dc, ac, mc; layer = k)
 			end
 		end
 
-		# --- insulators (wrap around the conductor group) ---
-		p1i   = insu[1]
-		matsi = _make_range(p1i.material);
-		dimsi = _make_range(p1i.dim[1]; pct = p1i.dim[2])
-		for mi in matsi, di in dimsi, ai in _expand_args(p1i.args)
-			ig = _init_ig(p1i.part_type, cg, di, ai, mi)
-			for pi in insu[2:end]
-				m2 = _make_range(pi.material);
-				d2 = _make_range(pi.dim[1]; pct = pi.dim[2])
-				for m2i in m2,
-					d2i in d2,
-					a2 in _expand_args(pi.args),
-					k ∈ 1:pi.n_layers
-
-					_add_insulator!(ig, pi.part_type, d2i, a2, m2i)
-				end
+		# 2) insulators
+		ig = _init_ig(p1i.part_type, cg, di, ai, mi)
+		for (pi, m2i, d2i, a2i) in chosen_i
+			for k in 1:pi.n_layers
+				_add_insulator!(ig, pi.part_type, d2i, a2i, m2i)
 			end
-			push!(variants, (DataModel.CableComponent(String(ps[1].component), cg, ig), ig))
+		end
+
+		# assemble trace
+		choices = PartChoice[]
+		# first conductor spec
+		push!(choices, PartChoice(1, :cond, p1c.part_type, d1, a1, mat1, p1c.n_layers))
+		# remaining conductors
+		for (j, (pc, mc, dc, ac)) in enumerate(chosen_c)
+			push!(choices, PartChoice(1 + j, :cond, pc.part_type, dc, ac, mc, pc.n_layers))
+		end
+		# first insulator spec
+		push!(
+			choices,
+			PartChoice(length(choices)+1, :insu, p1i.part_type, di, ai, mi, p1i.n_layers),
+		)
+		# remaining insulators
+		for (pi, m2i, d2i, a2i) in chosen_i
+			push!(
+				choices,
+				PartChoice(
+					length(choices)+1,
+					:insu,
+					pi.part_type,
+					d2i,
+					a2i,
+					m2i,
+					pi.n_layers,
+				),
+			)
+		end
+		ctrace = ComponentTrace(String(ps[1].component), choices)
+
+		push!(
+			variants,
+			(DataModel.CableComponent(String(ps[1].component), cg, ig), ig, ctrace),
+		)
+
+		# push!(variants, (DataModel.CableComponent(String(ps[1].component), cg, ig), ig))
+	end
+
+	# ---------------- enumerate insulators with coupling -------------
+	function choose_ins(idx::Int, mi, di, ai, mat1, d1, a1)
+		if idx > length(rest_ins_spaces)
+			build_with_current_selection(mat1, d1, a1, mi, di, ai)
+			return
+		end
+		pi, m2, d2, a2 = rest_ins_spaces[idx]
+
+		Ms = (m2 === nothing) ? (mi,) : m2
+		Ds = (d2 === nothing) ? (di,) : d2
+		As = (a2 === nothing) ? (ai,) : a2
+
+		for m2i in Ms, d2i in Ds, a2i in As
+			push!(chosen_i, (pi, m2i, d2i, a2i))
+			choose_ins(idx + 1, mi, di, ai, mat1, d1, a1)
+			pop!(chosen_i)
+		end
+	end
+
+	# ---------------- enumerate conductors with coupling -------------
+	function choose_cond(idx::Int, mat1, d1, a1, mi, di, ai)
+		if idx > length(rest_cond_spaces)
+			empty!(chosen_i)
+			choose_ins(1, mi, di, ai, mat1, d1, a1)
+			return
+		end
+		pc, mcs, dcs, acs = rest_cond_spaces[idx]
+
+		Ms = (mcs === nothing) ? (mat1,) : mcs
+		Ds = (dcs === nothing) ? (d1,) : dcs
+		As = (acs === nothing) ? (a1,) : acs
+
+		for mc in Ms, dc in Ds, ac in As
+			push!(chosen_c, (pc, mc, dc, ac))
+			choose_cond(idx + 1, mat1, d1, a1, mi, di, ai)
+			pop!(chosen_c)
+		end
+	end
+
+	# ---------------- top-level selection loops ----------------------
+	for mat1 in mats1, d1 in dims1, a1 in args1s
+		for mi in matsi, di in dimsi, ai in args1i
+			empty!(chosen_c)
+			empty!(chosen_i)
+			choose_cond(1, mat1, d1, a1, mi, di, ai)
 		end
 	end
 
 	return variants
 end
 
-function build_designs(cbs::CableBuilderSpec)
+
+function build_designs(cbs::CableBuilderSpec; trace::Bool = false)
 	comp_names = unique(p.component for p in cbs.parts)
 	by_comp = Dict{Symbol, Vector{PartSpec}}()
 	for p in cbs.parts
@@ -334,35 +466,120 @@ function build_designs(cbs::CableBuilderSpec)
 	end
 
 	# partials: (built_components, last_ig_or_nothing)
-	partials =
-		Tuple{Vector{DataModel.CableComponent}, Union{Nothing, DataModel.InsulatorGroup}}[
-			(Vector{DataModel.CableComponent}(), nothing)
-		]
+	partials = Tuple{
+		Vector{DataModel.CableComponent},
+		Union{Nothing, DataModel.InsulatorGroup},
+		Vector{ComponentTrace},
+	}[(DataModel.CableComponent[], nothing, ComponentTrace[])]
 
 	for cname in comp_names
 		ps = by_comp[cname]
 		new_partials = Tuple{
 			Vector{DataModel.CableComponent},
 			Union{Nothing, DataModel.InsulatorGroup},
+			Vector{ComponentTrace},
 		}[]
-		for (built, last_ig) in partials
-			base = last_ig === nothing ? 0.0 : last_ig  # will be resolved to last layer where needed
-			for (comp, ig) in _make_variants(ps, base)
-				push!(new_partials, (vcat(built, comp), ig))
+		for (built, last_ig, tr) in partials
+			base = last_ig === nothing ? 0.0 : last_ig
+			for (comp, ig, ctrace) in _make_variants(ps, base)
+				push!(new_partials, (vcat(built, comp), ig, [tr...; ctrace]))
 			end
 		end
 		partials = new_partials
 	end
 
-	designs = DataModel.CableDesign[]
-	for (comps, _) in partials
-		des = DataModel.CableDesign(cbs.cable_id, comps[1]; nominal_data = cbs.nominal)
-		for k in Iterators.drop(eachindex(comps), 1)
-			add!(des, comps[k])
+
+
+	if !trace
+		designs = DataModel.CableDesign[]
+		for (comps, _) in ((x[1], x[2]) for x in partials)
+			des = DataModel.CableDesign(cbs.cable_id, comps[1]; nominal_data = cbs.nominal)
+			for k in Iterators.drop(eachindex(comps), 1)
+				add!(des, comps[k])
+			end
+			push!(designs, des)
 		end
-		push!(designs, des)
+		return designs
+	else
+		out = Tuple{DataModel.CableDesign, DesignTrace}[]
+		for (comps, _, ctraces) in partials
+			des = DataModel.CableDesign(cbs.cable_id, comps[1]; nominal_data = cbs.nominal)
+			for k in Iterators.drop(eachindex(comps), 1)
+				add!(des, comps[k])
+			end
+			push!(out, (des, DesignTrace(cbs.cable_id, ctraces)))
+		end
+		return out
 	end
-	return designs
+end
+
+"""
+	iterate_designs(cbs) -> Channel{DataModel.CableDesign}
+
+Lazy stream of `CableDesign`s built from `CableBuilderSpec` without allocating all of them.
+Works with `for d in iterate_designs(cbs)`.
+"""
+function iterate_designs(cbs::CableBuilderSpec; trace::Bool = false)
+	# group parts by first occurrence of component symbol
+	comp_names = unique(p.component for p in cbs.parts)
+	by_comp = Dict{Symbol, Vector{PartSpec}}()
+	for p in cbs.parts
+		get!(by_comp, p.component, PartSpec[]) |> v -> push!(v, p)
+	end
+
+	return Channel(32) do ch
+		built = DataModel.CableComponent[]
+		lastig = Ref{Union{Nothing, DataModel.InsulatorGroup}}(nothing)
+		tr_stack = ComponentTrace[]
+
+		function dfs(idx::Int)
+			if idx > length(comp_names)
+				des = DataModel.CableDesign(
+					cbs.cable_id,
+					built[1];
+					nominal_data = cbs.nominal,
+				)
+				for k in Iterators.drop(eachindex(built), 1)
+					add!(des, built[k])
+				end
+				if trace
+					put!(ch, (des, DesignTrace(cbs.cable_id, copy(tr_stack))))
+				else
+					put!(ch, des)
+				end
+				return
+			end
+			cname = comp_names[idx];
+			ps    = by_comp[cname]
+			base  = (lastig[] === nothing) ? 0.0 : lastig[]
+			for (comp, ig, ctrace) in _make_variants(ps, base)
+				push!(built, comp);
+				prev = lastig[];
+				lastig[] = ig
+				push!(tr_stack, ctrace)
+				dfs(idx + 1)
+				pop!(tr_stack);
+				lastig[] = prev;
+				pop!(built)
+			end
+		end
+		dfs(1)
+	end
+end
+
+function show_trace(tr::DesignTrace)
+	println("Design: ", tr.cable_id)
+	for comp in tr.components
+		println("  Component: ", comp.name)
+		for c in comp.choices
+			mat = c.mat
+			println("    [", c.role, "] ", c.T,
+				" layers=", c.layers,
+				" dim=", c.dim,
+				" args=", c.args,
+				" ρ=", mat.rho, " εr=", mat.eps_r, " μr=", mat.mu_r)
+		end
+	end
 end
 
 module Conductor
@@ -389,12 +606,13 @@ module Conductor
 	function Stranded(component::Symbol; layers::Int, d, n::Int, lay = 11.0, mat)
 		@assert layers >= 1 "stranded: layers must be ≥ 1 (includes the central wire)."
 		specs = PartSpec[]
+		dspec = _spec(d)
 
 		# 1) central wire: 1 layer, n=1, lay=0.0
 		push!(
 			specs,
 			PartSpec(component, DataModel.WireArray, 1;
-				dim = _spec(d), args = (1, (0.0, nothing)), material = mat),
+				dim = dspec, args = (1, (0.0, nothing)), material = mat),
 		)
 
 		# 2) rings: (layers-1) layers, base n, common lay
@@ -402,7 +620,7 @@ module Conductor
 			push!(
 				specs,
 				PartSpec(component, DataModel.WireArray, layers - 1;
-					dim = _spec(d), args = (n, _spec(lay)), material = mat),
+					dim = dspec, args = (n, _spec(lay)), material = mat),
 			)
 		end
 
@@ -429,5 +647,79 @@ end
 # Submodule `WirePatterns`
 include("wirepatterns/WirePatterns.jl")
 using .WirePatterns
+
+# how many choices are in a "range-like" thing
+_choice_count(x) =
+	x === nothing                   ? 1 :
+	(x isa Tuple && length(x) == 2) ? _choice_count(x[1]) * _choice_count(x[2]) :
+	(x isa AbstractVector)          ? length(x) :
+	(x isa Tuple && length(x) == 3) ? last(x) : 1
+
+# count choices for a MaterialSpec (rho/eps/mu/T/α product)
+_choice_count(ms::MaterialSpec) = length(_make_range(ms))
+
+# args: each entry can be scalar | vector | (lo,hi,n) | (value_spec, pct_spec)
+_arg_choice_count(a) =
+	(a isa Tuple && length(a) == 2) ? (_choice_count(a[1]) * _choice_count(a[2])) :
+	_choice_count(a)
+
+_args_choice_count(args::Tuple) =
+	isempty(args) ? 1 : prod(_arg_choice_count(a) for a in args)
+
+function cardinality(cbs::CableBuilderSpec)
+	comp_names = unique(p.component for p in cbs.parts)
+	by_comp = Dict{Symbol, Vector{PartSpec}}()
+	for p in cbs.parts
+		get!(by_comp, p.component, PartSpec[]) |> v -> push!(v, p)
+	end
+
+	total = 1
+	for cname in comp_names
+		ps = by_comp[cname]
+		cond = [p for p in ps if p.part_type <: DataModel.AbstractConductorPart]
+		insu = [p for p in ps if p.part_type <: DataModel.AbstractInsulatorPart]
+		isempty(cond) && error("component '$cname' has no conductors")
+		isempty(insu) && error("component '$cname' has no insulators")
+
+		# first conductor axes
+		p1c    = cond[1]
+		c_dim  = _choice_count(p1c.dim[1]) * _choice_count(p1c.dim[2])
+		c_args = _args_choice_count(p1c.args)
+		c_mat  = _choice_count(p1c.material)
+
+		# uncoupled extras from later conductors (couple when tuples compare equal)
+		for pc in cond[2:end]
+			pc_dim_same  = (pc.dim == p1c.dim)
+			pc_args_same = (pc.args == p1c.args)
+			pc_mat_same  = (pc.material == p1c.material)
+
+			c_dim  *= pc_dim_same ? 1 : (_choice_count(pc.dim[1]) * _choice_count(pc.dim[2]))
+			c_args *= pc_args_same ? 1 : _args_choice_count(pc.args)
+			c_mat  *= pc_mat_same ? 1 : _choice_count(pc.material)
+		end
+		cond_factor = c_dim * c_args * c_mat
+
+		# first insulator axes
+		p1i    = insu[1]
+		i_dim  = _choice_count(p1i.dim[1]) * _choice_count(p1i.dim[2])
+		i_args = _args_choice_count(p1i.args)
+		i_mat  = _choice_count(p1i.material)
+
+		for pi in insu[2:end]
+			pi_dim_same  = (pi.dim == p1i.dim)
+			pi_args_same = (pi.args == p1i.args)
+			pi_mat_same  = (pi.material == p1i.material)
+
+			i_dim  *= pi_dim_same ? 1 : (_choice_count(pi.dim[1]) * _choice_count(pi.dim[2]))
+			i_args *= pi_args_same ? 1 : _args_choice_count(pi.args)
+			i_mat  *= pi_mat_same ? 1 : _choice_count(pi.material)
+		end
+		insu_factor = i_dim * i_args * i_mat
+
+		total *= cond_factor * insu_factor
+	end
+	return total
+end
+
 
 end # module ParametricBuilder

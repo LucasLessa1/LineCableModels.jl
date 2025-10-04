@@ -125,7 +125,7 @@ const _WIRE_RULES = Tuple{Int, Int, Union{Int, Nothing}}[
 Compute hexagonal-pattern strand layouts that approximate or meet the target metallic cross-section, imposing allowed total-wire ranges by target area.
 
 Inputs:
-- `target_area_m2` — target metallic area [m²].
+- `target_mm2`     — target metallic area [mm²].
 - `nmin`,`nmax`    — AWG range to consider (default 4/0 … 40).
 
 Returns:
@@ -135,10 +135,11 @@ Returns:
 - `min_diam`   — within allowed N(L) and A ≥ target, minimize diameter, then layers, then excess.
 				 Fallback: within allowed, pick smallest diameter with largest A < target (then smallest L).
 """
-function make_stranded(target_area_m2::Real; nmin::Integer = -3, nmax::Integer = 40)
-	@assert target_area_m2 > 0 "Target cross-section must be positive."
+function make_stranded(target_mm2::Real; nmin::Integer = -3, nmax::Integer = 40)
+	@assert target_mm2 > 0 "Target cross-section must be positive."
 	@assert nmin <= nmax "nmin must be ≤ nmax."
 
+	target_area_m2 = target_mm2 * 1e-6  # m²
 	# ---- hex geometry ----
 	_hex_N(L::Int) = 1 + 3L*(L - 1)         # total wires after L layers
 	_to_choice((dw, L, N, A, awg)) = HexaPattern(L, N, dw, A, awg)
@@ -158,7 +159,6 @@ function make_stranded(target_area_m2::Real; nmin::Integer = -3, nmax::Integer =
 	end
 
 	# Allowed wire-count range from target (mm²)
-	target_mm2 = target_area_m2 * 1e6
 	minN, maxN = _allowed_wires(target_mm2)
 
 	# AWG sizes (label, d_m)
@@ -233,8 +233,8 @@ Compute screen wire layouts that approximate or meet the target metallic cross-s
 while enforcing no-overlap wire array geometry (with optional clearance `gap_frac`).
 
 Arguments:
-- `A_req_m2`          — required metallic cross-section [m²].
-- `Dm_m`              — laying diameter (screen centerline) [m].
+- `A_req_mm2`         — required metallic cross-section [mm²].
+- `Dm_mm`             — laying diameter (screen centerline) [mm].
 - `alpha_deg`         — lay angle α in degrees (default 20°).
 - `coverage_min_pct`  — required geometric coverage (default 85%).
 - `gap_frac`          — extra clearance fraction in the no-overlap check (default 0).
@@ -249,17 +249,22 @@ Returns:
 				tie-break: smaller excess area.
 - `best_match`— among all feasible combos, area closest to A_req_m2; tie: smaller N, then smaller d.
 """
-function make_screened(A_req_m2::Real, Dm_m::Real;
+function make_screened(A_req_mm2::Real, Dm_mm::Real;
 	alpha_deg::Real = 15.0, coverage_min_pct::Real = 85.0,
 	gap_frac::Real = 0.0, min_wires::Int = 6, extra_span::Int = 8,
 	nmin::Integer = -3, nmax::Integer = 40,
 	coverage_max_pct::Real = 100.0,               # NEW: cap coverage to a single layer
 	max_overshoot_pct::Real = 10.0,                # NEW: optional cap on A overshoot (∞ to disable)
-	custom_diameters_m::AbstractVector{<:Real} = Float64[])
+	custom_diameters_mm::AbstractVector{<:Real} = Float64[])
 
 	@assert 0.0 < coverage_min_pct <= 100.0
 	@assert coverage_max_pct >= coverage_min_pct
 	@assert max_overshoot_pct ≥ 0
+	@assert A_req_mm2 > 0
+	@assert Dm_mm > 0
+
+	A_req_m2 = A_req_mm2 * 1e-6  # m²
+	Dm_m     = Dm_mm * 1e-3      # m
 
 	# --- helpers ---
 	function _max_wires_single_layer(Dm::Real, d::Real; gap_frac::Real = 0.0)
@@ -278,8 +283,8 @@ function make_screened(A_req_m2::Real, Dm_m::Real;
 
 	# AWG sizes + optional customs
 	sizes = awg_sizes(nmin, nmax)
-	for d in custom_diameters_m
-		push!(sizes, ("custom($(round(d*1e3; digits=3)) mm)", Float64(d)))
+	for d in custom_diameters_mm
+		push!(sizes, ("custom($(round(d; digits=3)) mm)", Float64(d)))
 	end
 	@assert !isempty(sizes)
 

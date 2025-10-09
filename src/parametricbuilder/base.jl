@@ -199,7 +199,12 @@ function Base.iterate(spec::SystemBuilderSpec)
 		x = take!(ch);
 		return (x, ch)
 	catch
-		return nothing
+		@error "SystemBuilderSpec iteration failed before first yield" exception=(
+			e,
+			catch_backtrace(),
+		)
+
+		rethrow()
 	end
 end
 
@@ -259,8 +264,8 @@ function Base.show(io::IO, ::MIME"text/plain", spec::SystemBuilderSpec)
 	for (i, p) in enumerate(spec.positions)
 		dxvals = _vals_axis(p.x0, p.dx)
 		dyvals = _vals_axis(p.y0, p.dy)
-		println(io, "    • p", i, "  x: ", _fmt_vals(dxvals), "   y: ", _fmt_vals(dyvals),
-			"   phases {", _fmt_map(p.conn), "}")
+		println(io, "    • p", i, "  x: ", _fmt_vals(dxvals), ", y: ", _fmt_vals(dyvals),
+			", phases: {", _fmt_map(p.conn), "}")
 	end
 
 	# system scalars
@@ -277,8 +282,8 @@ function Base.show(io::IO, ::MIME"text/plain", spec::SystemBuilderSpec)
 	# frequencies (deterministic vector coming from the user/spec)
 	if hasfield(SystemBuilderSpec, :frequencies) && !isempty(getfield(spec, :frequencies))
 		f = getfield(spec, :frequencies)
-		println(io, "  f      = ", _fmt_freqs(f))
+		println(io, "  f       = ", _fmt_freqs(f))
 	end
 
-	println(io, "  ⇒ total cardinality (upper bound): ", cardinality(spec))
+	println(io, "  cardinality (upper bound): ", cardinality(spec))
 end

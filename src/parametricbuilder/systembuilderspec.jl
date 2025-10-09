@@ -107,51 +107,6 @@ _expand_earth(e::EarthSpec) = (
 # Overlaps are *not* emitted (skipped with warning  by catching the geometry error).
 # Designs are identical per system realization (no cross-mixing).
 # ─────────────────────────────────────────────────────────────────────────────
-# function iterate_problems(spec::SystemBuilderSpec)
-# 	return Channel{LineParametersProblem}(32) do ch
-# 		for des in spec.builder
-# 			for L in _expand_pair(spec.length)
-# 				pos_spaces = map(_expand_position, spec.positions)
-# 				for choice in product(pos_spaces...)
-# 					try
-# 						# first cable via DataModel.CablePosition; rest via add!
-# 						x1, y1, c1 = choice[1]
-# 						sys = DataModel.LineCableSystem(
-# 							spec.system_id,
-# 							L,
-# 							DataModel.CablePosition(des, x1, y1, c1),
-# 						)
-# 						for k in Iterators.drop(eachindex(choice), 1)
-# 							xk, yk, ck = choice[k]
-# 							sys = add!(sys, des, xk, yk, ck)
-# 						end
-
-# 						for T in _expand_pair(spec.temperature)
-# 							for (ρ, ε, μ, t) in _expand_earth(spec.earth)
-# 								em = EarthModel(spec.frequencies, ρ, ε, μ; t = t)
-# 								prob = LineParametersProblem(sys;
-# 									temperature = T, earth_props = em,
-# 									frequencies = spec.frequencies)
-# 								put!(ch, prob)
-# 							end
-# 						end
-# 					catch e
-# 						# Do not generate overlapping systems.
-# 						# If the underlying add!/ctor throws an overlap/geometry error, skip.
-# 						if occursin("overlap", sprint(showerror, e))
-# 							@warn sprint(showerror, e)
-# 							@warn "Skipping..."
-# 							continue
-# 						else
-# 							rethrow()
-# 						end
-# 					end
-# 				end
-# 			end
-# 		end
-# 	end
-# end
-
 function iterate_problems(spec::SystemBuilderSpec)
 	return Channel{LineParametersProblem}(32) do ch
 		produced = 0
@@ -191,9 +146,9 @@ function iterate_problems(spec::SystemBuilderSpec)
 				end
 			end
 		catch e
-			@error "iterate_problems failed" exception=(e, catch_backtrace())
+			@error "iterate SystemBuilderSpec failed" exception=(e, catch_backtrace())
 		finally
-			@info "iterate_problems finished" produced=produced upper_bound=cardinality(
+			@info "iterate SystemBuilderSpec finished" produced=produced upper_bound=cardinality(
 				spec,
 			)
 		end

@@ -431,11 +431,7 @@ function make_space_geometry(workspace::FEMWorkspace)
 		),
 		get_earth_model_material(workspace, num_earth_layers),  # Earth material
 	)
-	@debug "Domain -> infinity markers:"
-	for point_marker in earth_interface_markers
-		workspace.unassigned_entities[point_marker] = earth_interface_entity
-		@debug "  Point $point_marker: ($(point_marker[1]), $(point_marker[2]), $(point_marker[3]))"
-	end
+
 
 	# Create mesh transitions if specified
 	if !isempty(workspace.formulation.mesh_transitions)
@@ -449,7 +445,8 @@ function make_space_geometry(workspace::FEMWorkspace)
 				transition.earth_layer
 			else
 				# Fallback auto-detection (should rarely happen due to constructor)
-				cy >= 0 ? 1 : 2
+				# cy >= 0 ? 1 : 2
+                get_cable_layer(cx, cy, earth_props, domain_radius)
 			end
 
 			# Validate layer index exists in earth model
@@ -518,5 +515,105 @@ function make_space_geometry(workspace::FEMWorkspace)
 		@debug "No mesh transitions specified"
 	end
 
+    # Add interface to the workspace
+    @debug "Domain -> infinity markers:"
+	for point_marker in earth_interface_markers
+		workspace.unassigned_entities[point_marker] = earth_interface_entity
+		@debug "  Point $point_marker: ($(point_marker[1]), $(point_marker[2]), $(point_marker[3]))"
+	end
+
     @info "Earth interfaces created"
+end
+
+"""
+    get_cable_layer(x::Number, y::Number, earth_model::EarthModel) -> Int
+
+Determines the index of the soil layer from the `EarthModel` where the cable 
+centroid located at `(x, y)` is situated.
+
+The function assumes Layer 1 is always air for any `y >= 0`. It then checks if the
+model uses vertical or horizontal layering to determine the correct layer index
+for `y < 0`.
+
+# Arguments
+- `x::Number`: The horizontal coordinate of the cable's centroid.
+- `y::Number`: The vertical coordinate of the cable's centroid (depth, negative).
+- `earth_model::EarthModel`: The earth model structure, which must contain a 
+  `layers` vector and a `vertical_layers` boolean.
+
+# Returns
+- `Int`: The index of the layer (1 for air, 2 for the first earth layer, etc.).
+"""
+
+function get_cable_layer(x::Number, y::Number, earth_model::EarthModel, domain_radius::Float64)
+    # Air layer (above ground)
+    if y >= 0.0
+        return 1
+    end
+    
+    num_layers = length(earth_model.layers)
+    
+    # Homogeneous earth (only 1 earth layer)
+    if num_layers == 2
+        return 2
+    end
+    
+    # Multi-layer earth
+    if earth_model.vertical_layers
+        # Vertical layers: extend horizontally
+        current_x = 0.0  # Starting boundary for layer 2
+        
+        for layer_idx in 2:num_layers
+            layer_thickness = earth_model.layers[layer_idx].t
+            
+            # Determine next boundary
+            next_x = isinf(layer_thickness) ? 0.0 : current_x + layer_thickness
+
+            if layer_idx == 2
+                if x >= -domain_radius && x <= next_x
+                    return layer_idx
+                end
+            else
+                if x > current_x && x <= next_x
+                    return layer_idx
+                end
+            end
+
+            # Update boundary for next iteration
+            current_x = next_x
+
+            # If we've reached domain radius, all remaining points belong to last layer
+            if current_x >= domain_radius
+                return layer_idx
+            end
+        end
+        
+        return num_layers
+        
+    else
+        # Horizontal layers: extend vertically downward
+
+        current_y = 0.0  # Starting depth
+        
+        for layer_idx in 2:num_layers
+            layer_thickness = earth_model.layers[layer_idx].t
+            
+            # Determine next depth boundary
+            next_y = isinf(layer_thickness) ? -domain_radius : current_y - layer_thickness
+
+            if y <= current_y && y >= next_y
+                return layer_idx
+            end
+            
+            # Update boundary for next iteration
+            current_y = next_y
+            
+            # Reached bottom of domain, all remaining points belong to last layer
+            if current_y <= -domain_radius
+                return layer_idx
+            end
+        end
+        # Fallback: return last layer
+        return num_layers
+    end
 end

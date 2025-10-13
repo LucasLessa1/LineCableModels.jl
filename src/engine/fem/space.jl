@@ -307,8 +307,6 @@ function make_space_geometry(workspace::FEMWorkspace)
                 x_pos = sqrt(domain_radius^2 - next_y_start^2)
                 x_pos_inf = sqrt(domain_radius_inf^2 - next_y_start^2)
 
-                @assert x_pos == 0.0 "Layer $layer_idx extends beyond domain radius"
-
                 interface_idx = layer_idx # The interface belongs to the layer below it
                 earth_interface_tag = encode_boundary_tag(3, interface_idx, 1)
                 earth_interface_name = create_physical_group_name(workspace, earth_interface_tag)
@@ -439,14 +437,14 @@ function make_space_geometry(workspace::FEMWorkspace)
 
 		for (idx, transition) in enumerate(workspace.formulation.mesh_transitions)
 			cx, cy = transition.center
-
+			transition_radii =
+				collect(LinRange(transition.r_min, transition.r_max, transition.n_regions))
 			# Use provided layer or auto-detect
 			layer_idx = if !isnothing(transition.earth_layer)
 				transition.earth_layer
 			else
 				# Fallback auto-detection (should rarely happen due to constructor)
-				# cy >= 0 ? 1 : 2
-                get_cable_layer(cx, cy, earth_props, domain_radius)
+                get_cable_layer(cx, cy, transition_radii[end], earth_props, domain_radius)
 			end
 
 			# Validate layer index exists in earth model
@@ -477,8 +475,6 @@ function make_space_geometry(workspace::FEMWorkspace)
 			mesh_size_min = transition.mesh_factor_min * earth_interface_mesh_size
 			mesh_size_max = transition.mesh_factor_max * earth_interface_mesh_size
 
-			transition_radii =
-				collect(LinRange(transition.r_min, transition.r_max, transition.n_regions))
 			transition_mesh =
 				collect(LinRange(mesh_size_min, mesh_size_max, transition.n_regions))
 			@debug "Transition $(idx): radii=$(transition_radii), mesh sizes=$(transition_mesh)"
@@ -538,82 +534,106 @@ for `y < 0`.
 # Arguments
 - `x::Number`: The horizontal coordinate of the cable's centroid.
 - `y::Number`: The vertical coordinate of the cable's centroid (depth, negative).
+- `outermost_radius::Float64`: The outermost radius of the cable.
 - `earth_model::EarthModel`: The earth model structure, which must contain a 
   `layers` vector and a `vertical_layers` boolean.
+- `domain_radius::Float64`: The radius of the simulation domain.
 
 # Returns
 - `Int`: The index of the layer (1 for air, 2 for the first earth layer, etc.).
 """
-
-function get_cable_layer(x::Number, y::Number, earth_model::EarthModel, domain_radius::Float64)
-    # Air layer (above ground)
-    if y >= 0.0
-        return 1
-    end
+function get_cable_layer(x::Number, y::Number, outermost_radius::Float64, earth_model::EarthModel, domain_radius::Float64)
     
-    num_layers = length(earth_model.layers)
+    number_of_points = round(Int, 2 * pi * outermost_radius / 0.01)
+    layer_idx_in_circle = Int64[]
+    for θ in LinRange(0, 2*pi, number_of_points)
+        x_p = x + outermost_radius * cos(θ)
+        y_p = y + outermost_radius * sin(θ)
     
-    # Homogeneous earth (only 1 earth layer)
-    if num_layers == 2
-        return 2
-    end
-    
-    # Multi-layer earth
-    if earth_model.vertical_layers
-        # Vertical layers: extend horizontally
-        current_x = 0.0  # Starting boundary for layer 2
-        
-        for layer_idx in 2:num_layers
-            layer_thickness = earth_model.layers[layer_idx].t
-            
-            # Determine next boundary
-            next_x = isinf(layer_thickness) ? 0.0 : current_x + layer_thickness
-
-            if layer_idx == 2
-                if x >= -domain_radius && x <= next_x
-                    return layer_idx
-                end
-            else
-                if x > current_x && x <= next_x
-                    return layer_idx
-                end
-            end
-
-            # Update boundary for next iteration
-            current_x = next_x
-
-            # If we've reached domain radius, all remaining points belong to last layer
-            if current_x >= domain_radius
-                return layer_idx
-            end
+        if (x_p^2 + y_p^2) > domain_radius^2
+            # This point is irrelevant to the simulation. Skip to the next one.
+            Base.error("Mesh Transition outside domain radius!") 
         end
-        
-        return num_layers
-        
+        # Air layer (above ground)
+        if y_p >= 0.0
+            push!(layer_idx_in_circle, 1)
+            continue
+        end
+
+        num_layers = length(earth_model.layers)
+
+        # Homogeneous earth (only 1 earth layer)
+        if num_layers == 2
+            push!(layer_idx_in_circle, 2)
+            continue
+        end
+
+        # Multi-layer earth
+        if earth_model.vertical_layers
+            # Vertical layers: extend horizontally
+            current_x = 0.0  # Starting boundary for layer 2
+            layer_found = false 
+            for layer_idx in 2:num_layers
+                layer_thickness = earth_model.layers[layer_idx].t
+
+                # Determine next boundary
+                next_x = isinf(layer_thickness) ? 0.0 : current_x + layer_thickness
+
+                if layer_idx == 2
+                    if x_p >= -domain_radius && x_p <= next_x
+                        push!(layer_idx_in_circle, layer_idx)
+                        layer_found = true
+                        break
+                    end
+                else
+                    if x_p > current_x && x_p <= next_x
+                        push!(layer_idx_in_circle, layer_idx)
+                        layer_found = true
+                        break
+                    end
+                end
+
+                # Update boundary for next iteration
+                current_x = next_x
+            end
+
+            if !layer_found
+                # Fallback: return last layer
+                push!(layer_idx_in_circle, num_layers)
+            end
+
+        else
+            # Horizontal layers: extend vertically downward
+            current_y = 0.0  # Starting depth
+            layer_found = false 
+            for layer_idx in 2:num_layers
+                layer_thickness = earth_model.layers[layer_idx].t
+                
+                # Determine next depth boundary
+                next_y = isinf(layer_thickness) ? -domain_radius : current_y - layer_thickness
+
+                if y_p <= current_y && y_p >= next_y
+                    push!(layer_idx_in_circle, layer_idx)
+                    layer_found = true
+                    break
+                end
+                
+                # Update boundary for next iteration
+                current_y = next_y
+            end
+            if !layer_found
+                # Fallback: return last layer
+                push!(layer_idx_in_circle, num_layers)
+            end
+
+        end
+    end
+    if !isempty(layer_idx_in_circle) && all(==(layer_idx_in_circle[1]), layer_idx_in_circle)
+        # The condition passed, do nothing or proceed.
+        @debug "All mesh elements are self-contained in a single layer."
+        return layer_idx_in_circle[1]
     else
-        # Horizontal layers: extend vertically downward
-
-        current_y = 0.0  # Starting depth
-        
-        for layer_idx in 2:num_layers
-            layer_thickness = earth_model.layers[layer_idx].t
-            
-            # Determine next depth boundary
-            next_y = isinf(layer_thickness) ? -domain_radius : current_y - layer_thickness
-
-            if y <= current_y && y >= next_y
-                return layer_idx
-            end
-            
-            # Update boundary for next iteration
-            current_y = next_y
-            
-            # Reached bottom of domain, all remaining points belong to last layer
-            if current_y <= -domain_radius
-                return layer_idx
-            end
-        end
-        # Fallback: return last layer
-        return num_layers
+        # The condition failed, throw an error.
+        Base.error("Not all mesh elements are self-contained in a single layer!")
     end
 end

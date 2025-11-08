@@ -25,7 +25,7 @@ $(EXPORTS)
 module Engine
 
 # Export public API
-export LineParametersProblem,
+export LineParametersProblem, AmpacityProblem,
 	LineParameters, SeriesImpedance, ShuntAdmittance, per_km, per_m, kronify
 export EMTFormulation, FormulationSet, LineParamOptions
 

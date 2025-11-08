@@ -26,7 +26,7 @@ function make_space_geometry(workspace::FEMWorkspace)
     @info "Creating domain boundaries..."
 
     # Extract parameters
-    formulation = workspace.formulation
+    formulation = workspace.core.formulation
     domain_radius = formulation.domain_radius
     domain_radius_inf = formulation.domain_radius_inf  # External radius for boundary transform
     mesh_size_default = formulation.mesh_size_default
@@ -61,7 +61,7 @@ function make_space_geometry(workspace::FEMWorkspace)
     )
 
     # Get earth model from workspace
-    earth_props = workspace.problem_def.earth_props
+    earth_props = workspace.core.earth_props
     air_layer_idx = 1 # air layer is 1 by default
     num_earth_layers = length(earth_props.layers) # Number of earth layers
 
@@ -111,8 +111,8 @@ function make_space_geometry(workspace::FEMWorkspace)
         air_material,
     )
     # Add curves to the workspace
-    workspace.unassigned_entities[air_boundary_marker] = air_boundary_entity
-    workspace.unassigned_entities[air_infty_marker] = air_infty_entity
+    workspace.core.unassigned_entities[air_boundary_marker] = air_boundary_entity
+    workspace.core.unassigned_entities[air_infty_marker] = air_infty_entity
 
 
     # Create domain surfaces
@@ -125,10 +125,10 @@ function make_space_geometry(workspace::FEMWorkspace)
         CoreEntityData(air_infshell_tag, air_infshell_name, mesh_size_default),
         air_material,
     )
-    # Add surfaces to the workspace    
-    workspace.unassigned_entities[air_region_marker] = air_region_entity
-    workspace.unassigned_entities[air_infshell_marker] = air_infshell_entity
-	
+    # Add surfaces to the workspace
+    workspace.core.unassigned_entities[air_region_marker] = air_region_entity
+    workspace.core.unassigned_entities[air_infshell_marker] = air_infshell_entity
+
     # Add physical groups to the workspace
 	register_physical_group!(workspace, air_region_tag, air_material)
 	register_physical_group!(workspace, air_infshell_tag, air_material)
@@ -153,14 +153,14 @@ function make_space_geometry(workspace::FEMWorkspace)
     @debug "Domain boundary markers:"
     for point_marker in domain_boundary_markers
         target_entity = point_marker[2] > 0 ? air_boundary_entity : earth_boundary_entity
-        workspace.unassigned_entities[point_marker] = target_entity
+        workspace.core.unassigned_entities[point_marker] = target_entity
         @debug "  Point $point_marker: ($(point_marker[1]), $(point_marker[2]), $(point_marker[3]))"
     end
     
     @debug "Domain -> infinity markers:"
     for point_marker in domain_infty_markers
         target_entity = point_marker[2] > 0 ? air_infty_entity : earth_infty_entity
-        workspace.unassigned_entities[point_marker] = target_entity
+        workspace.core.unassigned_entities[point_marker] = target_entity
         @debug "  Point $point_marker: ($(point_marker[1]), $(point_marker[2]), $(point_marker[3]))"
     end
     
@@ -223,8 +223,8 @@ function make_space_geometry(workspace::FEMWorkspace)
 
             earth_region_marker = [next_x_start-eps, -eps, 0.0]
 
-            workspace.unassigned_entities[earth_boundary_marker] = earth_boundary_entity
-            workspace.unassigned_entities[earth_infty_marker] = earth_infty_entity
+            workspace.core.unassigned_entities[earth_boundary_marker] = earth_boundary_entity
+            workspace.core.unassigned_entities[earth_infty_marker] = earth_infty_entity
             earth_infshell_marker = [[0.99*(next_x_start-eps), -0.99*sqrt(domain_radius_inf^2 - (next_x_start-eps)^2), 0.0]]
 
             interface_idx = layer_idx
@@ -270,7 +270,7 @@ function make_space_geometry(workspace::FEMWorkspace)
 
                 @debug "Domain interface vertical layers markers:"
                 for point_marker in earth_interface_markers
-                    workspace.unassigned_entities[point_marker] = earth_interface_entity
+                    workspace.core.unassigned_entities[point_marker] = earth_interface_entity
                     @debug "  Point $point_marker: ($(point_marker[1]), $(point_marker[2]), $(point_marker[3]))"
                 end
                 current_x_start = next_x_start
@@ -291,10 +291,10 @@ function make_space_geometry(workspace::FEMWorkspace)
 
 
             for marker in earth_boundary_marker
-                workspace.unassigned_entities[marker] = earth_boundary_entity
+                workspace.core.unassigned_entities[marker] = earth_boundary_entity
             end
             for marker in earth_infty_marker
-                workspace.unassigned_entities[marker] = earth_infty_entity
+                workspace.core.unassigned_entities[marker] = earth_infty_entity
             end
 
             earth_region_marker = [0.0, current_y_start - eps, 0.0]
@@ -359,7 +359,7 @@ function make_space_geometry(workspace::FEMWorkspace)
                 # Associates the line points with the interface entity
                 @debug "Domain interface horizontal layer markers at y = $(next_y_start):"
                 for point_marker in earth_interface_markers
-                    workspace.unassigned_entities[point_marker] = interface_entity
+                    workspace.core.unassigned_entities[point_marker] = interface_entity
                     @debug "  Point $point_marker: ($(point_marker[1]), $(point_marker[2]), $(point_marker[3]))"
                 end
             end
@@ -398,9 +398,9 @@ function make_space_geometry(workspace::FEMWorkspace)
             earth_material,
         )
 
-        workspace.unassigned_entities[earth_region_marker] = earth_region_entity
+        workspace.core.unassigned_entities[earth_region_marker] = earth_region_entity
         for marker in earth_infshell_marker
-            workspace.unassigned_entities[marker] = earth_infshell_entity
+            workspace.core.unassigned_entities[marker] = earth_infshell_entity
         end
 
 
@@ -432,10 +432,10 @@ function make_space_geometry(workspace::FEMWorkspace)
 
 
 	# Create mesh transitions if specified
-	if !isempty(workspace.formulation.mesh_transitions)
-		@info "Creating $(length(workspace.formulation.mesh_transitions)) mesh transition regions"
+	if !isempty(workspace.core.formulation.mesh_transitions)
+		@info "Creating $(length(workspace.core.formulation.mesh_transitions)) mesh transition regions"
 
-		for (idx, transition) in enumerate(workspace.formulation.mesh_transitions)
+		for (idx, transition) in enumerate(workspace.core.formulation.mesh_transitions)
 			cx, cy = transition.center
 			transition_radii =
 				collect(LinRange(transition.r_min, transition.r_max, transition.n_regions))
@@ -497,7 +497,7 @@ function make_space_geometry(workspace::FEMWorkspace)
 					),
 					transition_material,
 				)
-				workspace.unassigned_entities[transition_markers[k]] = transition_region
+				workspace.core.unassigned_entities[transition_markers[k]] = transition_region
 
 				@debug "Created transition region $k at ($(cx), $(cy)) with radius $(transition_radii[k]) m in layer $layer_idx"
 			end
@@ -514,7 +514,7 @@ function make_space_geometry(workspace::FEMWorkspace)
     # Add interface to the workspace
     @debug "Domain -> infinity markers:"
 	for point_marker in earth_interface_markers
-		workspace.unassigned_entities[point_marker] = earth_interface_entity
+		workspace.core.unassigned_entities[point_marker] = earth_interface_entity
 		@debug "  Point $point_marker: ($(point_marker[1]), $(point_marker[2]), $(point_marker[3]))"
 	end
 

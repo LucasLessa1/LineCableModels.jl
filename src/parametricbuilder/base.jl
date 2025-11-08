@@ -277,6 +277,7 @@ function Base.show(io::IO, ::MIME"text/plain", spec::SystemBuilderSpec)
 	println(io, "    ρ     = ", _fmt_vals(_vals_pair(spec.earth.rho)))
 	println(io, "    εr    = ", _fmt_vals(_vals_pair(spec.earth.eps_r)))
 	println(io, "    μr    = ", _fmt_vals(_vals_pair(spec.earth.mu_r)))
+	println(io, "    κr    = ", _fmt_vals(_vals_pair(spec.earth.kappa_r)))
 	println(io, "    t     = ", _fmt_vals(_vals_pair(spec.earth.t)))
 
 	# frequencies (deterministic vector coming from the user/spec)

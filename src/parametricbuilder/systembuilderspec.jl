@@ -40,13 +40,14 @@ struct EarthSpec
 	rho::Any;
 	eps_r::Any;
 	mu_r::Any;
+	kappa::Any;
 	t::Any
 end
-EarthSpec(; rho, eps_r = 1.0, mu_r = 1.0, t = Inf) =
-	EarthSpec(_spec(rho), _spec(eps_r), _spec(mu_r), _spec(t))
+EarthSpec(; rho, eps_r = 1.0, mu_r = 1.0, kappa = 1.0, t = Inf) =
+	EarthSpec(_spec(rho), _spec(eps_r), _spec(mu_r), _spec(kappa), _spec(t))
 
-Earth(; rho, eps_r = 1.0, mu_r = 1.0, t = Inf) =
-	EarthSpec(_spec(rho), _spec(eps_r), _spec(mu_r), _spec(t))
+Earth(; rho, eps_r = 1.0, mu_r = 1.0, kappa = 1.0, t = Inf) =
+	EarthSpec(_spec(rho), _spec(eps_r), _spec(mu_r), _spec(kappa), _spec(t))
 
 struct SystemBuilderSpec
 	system_id::String
@@ -95,11 +96,12 @@ _expand_position(p::_Pos) =
 	((x, y, p.conn) for x in _axis(p.x0, p.dx), y in _axis(p.y0, p.dy))
 
 _expand_earth(e::EarthSpec) = (
-	(ρ, ε, μ, t)
+	(ρ, ε, μ, t, κ)
 	for ρ in _expand_pair(e.rho), #_make_range(e.rho[1]; pct = e.rho[2]),
 	ε in _expand_pair(e.eps_r), #_make_range(e.epsr[1]; pct = e.epsr[2]),
 	μ in _expand_pair(e.mu_r), #_make_range(e.mur[1]; pct = e.mur[2]),
-	t in _expand_pair(e.t) #_make_range(e.t[1]; pct = e.t[2])
+	t in _expand_pair(e.t), #_make_range(e.t[1]; pct = e.t[2]),
+	κ in _expand_pair(e.kappa)
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -124,8 +126,8 @@ function iterate_problems(spec::SystemBuilderSpec)
 								sys = add!(sys, des, xk, yk, ck)
 							end
 							for T in _expand_pair(spec.temperature)
-								for (ρ, ε, μ, t) in _expand_earth(spec.earth)
-									em = EarthModel(spec.frequencies, ρ, ε, μ; t = t)
+								for (ρ, ε, μ, t, κ) in _expand_earth(spec.earth)
+									em = EarthModel(spec.frequencies, ρ, ε, μ, κ; t = t)
 									prob = LineParametersProblem(sys;
 										temperature = T, earth_props = em,
 										frequencies = spec.frequencies)
